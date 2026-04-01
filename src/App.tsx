@@ -8,53 +8,58 @@ import { MyReservations } from "@/pages/MyReservations"
 import { MyProfile } from "@/pages/MyProfile"
 import { Admin } from "@/pages/Admin"
 import { Onboarding } from "@/pages/Onboarding"
-import { mockMembers } from "@/data/mock"
+import { Toast } from "@/components/ui/toast"
 import { useAuth } from "@/hooks/useAuth"
 import { useSessions } from "@/hooks/useSessions"
 import { useReservations } from "@/hooks/useReservations"
 import { useNavigation } from "@/hooks/useNavigation"
-import type { Member } from "@/types"
+import { useToast } from "@/hooks/useToast"
 
 export default function App() {
-  const [members, setMembers] = useState<Member[]>(mockMembers)
   const [showOnboarding, setShowOnboarding] = useState(false)
 
   const { page, selectedSessionId, navigate, resetNavigation } = useNavigation()
+  const { toast, showToast, hideToast } = useToast()
 
   const {
     sessions,
-    resetSessions,
-    addParticipant,
+    refreshSession,
     handleCreateSession,
     handleConfirmPayment,
     handlePromoteFromWaitlist,
     handleCancelParticipant,
-    handleCancelMyParticipant,
     handleUpdateSessionStatus,
     handleEditSession,
     handleDeleteSession,
-  } = useSessions()
+  } = useSessions(showToast)
 
-  const { currentUser, handleLogin, handleSignup, handleLogout, handleUpdateProfile } =
-    useAuth(setMembers)
+  const { currentUser, authLoading, handleLogin, handleSignup, handleLogout, handleUpdateProfile, handleChangePassword } =
+    useAuth(showToast)
 
-  const { reservations, resetReservations, handleReserve, handleWaitlist, handleCancel } =
-    useReservations(currentUser, sessions, addParticipant, handleCancelMyParticipant)
+  const { reservations, handleReserve, handleWaitlist, handleCancel } =
+    useReservations(currentUser, refreshSession, showToast)
 
-  function handleLogoutAndReset() {
+  async function handleLogoutAndReset() {
     handleLogout()
-    resetSessions()
-    resetReservations()
     resetNavigation()
+  }
+
+  if (authLoading) {
+    return <div className="flex min-h-svh items-center justify-center bg-background text-muted-foreground text-sm">로딩 중...</div>
   }
 
   if (!currentUser) {
     return (
-      <Auth
-        members={members}
-        onLogin={handleLogin}
-        onSignup={(data) => { handleSignup(data); setShowOnboarding(true) }}
-      />
+      <>
+        <Auth
+          onLogin={handleLogin}
+          onSignup={async (data) => {
+            await handleSignup(data)
+            setShowOnboarding(true)
+          }}
+        />
+        {toast && <Toast message={toast.message} type={toast.type} onClose={hideToast} />}
+      </>
     )
   }
 
@@ -71,7 +76,7 @@ export default function App() {
           <Home currentUser={currentUser} sessions={sessions} reservations={reservations} onNavigate={navigate} />
         )}
         {page === "profile" && (
-          <MyProfile currentUser={currentUser} onUpdate={handleUpdateProfile} onLogout={handleLogoutAndReset} />
+          <MyProfile currentUser={currentUser} onUpdate={handleUpdateProfile} onChangePassword={handleChangePassword} onLogout={handleLogoutAndReset} />
         )}
         {page === "sessions" && (
           <SessionList sessions={sessions} onNavigate={navigate} />
@@ -93,7 +98,6 @@ export default function App() {
         {page === "admin" && (
           <Admin
             sessions={sessions}
-            members={members}
             currentUser={currentUser}
             onNavigate={navigate}
             onConfirmPayment={handleConfirmPayment}
@@ -107,6 +111,7 @@ export default function App() {
         )}
       </main>
       <Navbar currentPage={page} isAdmin={currentUser.isAdmin} onNavigate={navigate} />
+      {toast && <Toast message={toast.message} type={toast.type} onClose={hideToast} />}
     </div>
   )
 }

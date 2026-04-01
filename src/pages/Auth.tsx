@@ -3,19 +3,25 @@ import { Button } from "@/components/ui/button"
 import { PasswordInput } from "@/components/ui/password-input"
 import { cn, formatPhone } from "@/lib/utils"
 import { LEVEL_COLORS } from "@/lib/badminton"
-import type { BadmintonLevel, Gender, Member } from "@/types"
+import type { BadmintonLevel, Gender } from "@/types"
 
 const LEVELS: BadmintonLevel[] = ["S", "A", "B", "C", "D"]
 
 interface AuthProps {
-  members: Member[]
-  onLogin: (member: Member) => void
-  onSignup: (member: Omit<Member, "id" | "joinedAt" | "isAdmin">) => void
+  onLogin: (phone: string, password: string) => Promise<unknown>
+  onSignup: (data: {
+    name: string
+    birthdate: string
+    gender: string
+    level: string
+    phone: string
+    password: string
+  }) => Promise<unknown>
 }
 
 type Tab = "login" | "signup"
 
-export function Auth({ members, onLogin, onSignup }: AuthProps) {
+export function Auth({ onLogin, onSignup }: AuthProps) {
   const [tab, setTab] = useState<Tab>("login")
 
   return (
@@ -43,9 +49,9 @@ export function Auth({ members, onLogin, onSignup }: AuthProps) {
         </div>
 
         {tab === "login" ? (
-          <LoginForm members={members} onLogin={onLogin} onSwitchToSignup={() => setTab("signup")} />
+          <LoginForm onLogin={onLogin} onSwitchToSignup={() => setTab("signup")} />
         ) : (
-          <SignupForm members={members} onSignup={onSignup} onSwitchToLogin={() => setTab("login")} />
+          <SignupForm onSignup={onSignup} onSwitchToLogin={() => setTab("login")} />
         )}
       </div>
     </div>
@@ -54,33 +60,29 @@ export function Auth({ members, onLogin, onSignup }: AuthProps) {
 
 /* ── 로그인 ───────────────────────────────────────────── */
 function LoginForm({
-  members,
   onLogin,
   onSwitchToSignup,
 }: {
-  members: Member[]
-  onLogin: (member: Member) => void
+  onLogin: (phone: string, password: string) => Promise<unknown>
   onSwitchToSignup: () => void
 }) {
   const [phone, setPhone]       = useState("")
   const [password, setPassword] = useState("")
   const [showPw, setShowPw]     = useState(false)
   const [error, setError]       = useState("")
+  const [loading, setLoading]   = useState(false)
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError("")
-
-    const found = members.find((m) => m.phone === phone.trim())
-    if (!found) {
-      setError("등록되지 않은 전화번호입니다.")
-      return
+    setLoading(true)
+    try {
+      await onLogin(phone.replace(/-/g, ""), password)
+    } catch {
+      setError("전화번호 또는 비밀번호가 올바르지 않습니다.")
+    } finally {
+      setLoading(false)
     }
-    if (found.password !== password) {
-      setError("비밀번호가 올바르지 않습니다.")
-      return
-    }
-    onLogin(found)
   }
 
   return (
@@ -102,7 +104,9 @@ function LoginForm({
 
       {error && <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>}
 
-      <Button type="submit" className="mt-2 w-full" size="lg">로그인</Button>
+      <Button type="submit" className="mt-2 w-full" size="lg" disabled={loading}>
+        {loading ? "로그인 중..." : "로그인"}
+      </Button>
 
       <p className="text-center text-sm text-muted-foreground">
         아직 회원이 아니신가요?{" "}
@@ -116,12 +120,17 @@ function LoginForm({
 
 /* ── 회원가입 ─────────────────────────────────────────── */
 function SignupForm({
-  members,
   onSignup,
   onSwitchToLogin,
 }: {
-  members: Member[]
-  onSignup: (member: Omit<Member, "id" | "joinedAt" | "isAdmin">) => void
+  onSignup: (data: {
+    name: string
+    birthdate: string
+    gender: string
+    level: string
+    phone: string
+    password: string
+  }) => Promise<unknown>
   onSwitchToLogin: () => void
 }) {
   const [name, setName]           = useState("")
@@ -134,22 +143,33 @@ function SignupForm({
   const [showPw, setShowPw]       = useState(false)
   const [showCPw, setShowCPw]     = useState(false)
   const [error, setError]         = useState("")
+  const [loading, setLoading]     = useState(false)
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError("")
 
-    if (!name.trim())       { setError("이름을 입력해주세요."); return }
-    if (!gender || !level) { setError("성별과 급수를 선택해주세요."); return }
-    if (!birthdate)         { setError("생년월일을 입력해주세요."); return }
-    if (password.length < 6) { setError("비밀번호는 6자 이상이어야 합니다."); return }
+    if (!name.trim())         { setError("이름을 입력해주세요."); return }
+    if (!gender || !level)    { setError("성별과 급수를 선택해주세요."); return }
+    if (!birthdate)           { setError("생년월일을 입력해주세요."); return }
+    if (password.length < 6)  { setError("비밀번호는 6자 이상이어야 합니다."); return }
     if (password !== confirmPw) { setError("비밀번호가 일치하지 않습니다."); return }
-    if (members.some((m) => m.phone === phone.trim())) {
-      setError("이미 가입된 전화번호입니다. 로그인해주세요.")
-      return
-    }
 
-    onSignup({ name: name.trim(), birthdate, gender, level, phone: phone.trim(), password })
+    setLoading(true)
+    try {
+      await onSignup({
+        name: name.trim(),
+        birthdate,
+        gender,
+        level,
+        phone: phone.replace(/-/g, ""),
+        password,
+      })
+    } catch {
+      setError("이미 가입된 전화번호입니다.")
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -211,7 +231,9 @@ function SignupForm({
 
       {error && <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>}
 
-      <Button type="submit" className="mt-2 w-full" size="lg">가입하기</Button>
+      <Button type="submit" className="mt-2 w-full" size="lg" disabled={loading}>
+        {loading ? "가입 중..." : "가입하기"}
+      </Button>
 
       <p className="text-center text-sm text-muted-foreground">
         이미 회원이신가요?{" "}

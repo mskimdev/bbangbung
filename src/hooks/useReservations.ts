@@ -1,73 +1,87 @@
-import { useState } from "react"
-import { mockReservations } from "@/data/mock"
-import type { BbangSession, Member, Reservation, SessionParticipant } from "@/types"
+import { useState, useEffect } from "react"
+import type { Member, Reservation } from "@/types"
+import api from "@/lib/api"
+
+type ShowToast = (message: string, type?: "success" | "error") => void
+
+function getErrorMessage(error: unknown): string {
+  if (error && typeof error === "object" && "response" in error) {
+    const res = (error as any).response
+    if (res?.data?.message) return res.data.message
+  }
+  return "오류가 발생했습니다."
+}
+
+function mapReservation(r: any): Reservation {
+  return {
+    id: r.id,
+    sessionId: r.sessionId,
+    sessionTitle: r.sessionTitle,
+    date: r.date,
+    startTime: r.startTime,
+    endTime: r.endTime,
+    location: r.location,
+    fee: r.fee,
+    status: r.status,
+    createdAt: r.createdAt,
+  }
+}
 
 export function useReservations(
   currentUser: Member | null,
-  sessions: BbangSession[],
-  addParticipant: (sessionId: string, participant: SessionParticipant) => void,
-  cancelMyParticipant: (sessionId: string, memberId: string) => void,
+  refreshSession: (sessionId: string) => Promise<void>,
+  showToast: ShowToast,
 ) {
-  const [reservations, setReservations] = useState<Reservation[]>(mockReservations)
+  const [reservations, setReservations] = useState<Reservation[]>([])
 
-  function resetReservations() {
-    setReservations(mockReservations)
-  }
-
-  function buildParticipant(user: Member, status: SessionParticipant["status"]): SessionParticipant {
-    return {
-      memberId: user.id,
-      memberName: user.name,
-      gender: user.gender,
-      level: user.level,
-      reservedAt: new Date().toISOString().slice(0, 10),
-      status,
+  async function fetchReservations() {
+    if (!currentUser) return
+    try {
+      const { data } = await api.get(`/reservations/members/${currentUser.id}`)
+      setReservations(data.map(mapReservation))
+    } catch (e) {
+      showToast(getErrorMessage(e), "error")
     }
   }
 
-  function buildReservation(session: BbangSession, status: Reservation["status"]): Reservation {
-    return {
-      id: `res-${Date.now()}`,
-      sessionId: session.id,
-      sessionTitle: session.title,
-      date: session.date,
-      startTime: session.startTime,
-      endTime: session.endTime,
-      location: session.location,
-      fee: session.fee,
-      status,
-      createdAt: new Date().toISOString().slice(0, 10),
+  useEffect(() => {
+    fetchReservations()
+  }, [currentUser])
+
+  async function handleReserve(sessionId: string) {
+    if (!currentUser) return
+    try {
+      await api.post("/reservations", { memberId: currentUser.id, sessionId })
+      await Promise.all([fetchReservations(), refreshSession(sessionId)])
+      showToast("예약 신청이 완료되었습니다.")
+    } catch (e) {
+      showToast(getErrorMessage(e), "error")
     }
   }
 
-  function handleReserve(sessionId: string) {
+  async function handleWaitlist(sessionId: string) {
     if (!currentUser) return
-    const session = sessions.find((s) => s.id === sessionId)
-    if (!session) return
-
-    addParticipant(sessionId, buildParticipant(currentUser, "pending"))
-    setReservations((prev) => [...prev, buildReservation(session, "pending")])
+    try {
+      await api.post("/reservations/waitlist", { memberId: currentUser.id, sessionId })
+      await Promise.all([fetchReservations(), refreshSession(sessionId)])
+      showToast("대기 신청이 완료되었습니다.")
+    } catch (e) {
+      showToast(getErrorMessage(e), "error")
+    }
   }
 
-  function handleWaitlist(sessionId: string) {
+  async function handleCancel(reservationId: string) {
     if (!currentUser) return
-    const session = sessions.find((s) => s.id === sessionId)
-    if (!session) return
-
-    addParticipant(sessionId, buildParticipant(currentUser, "waitlisted"))
-    setReservations((prev) => [...prev, buildReservation(session, "waitlisted")])
-  }
-
-  function handleCancel(reservationId: string) {
     const reservation = reservations.find((r) => r.id === reservationId)
     if (!reservation) return
-
-    setReservations((prev) =>
-      prev.map((r) => (r.id === reservationId ? { ...r, status: "cancelled" } : r)),
-    )
-    if (!currentUser) return
-    cancelMyParticipant(reservation.sessionId, currentUser.id)
+    try {
+      await api.delete("/reservations", { data: { memberId: currentUser.id, sessionId: reservation.sessionId } })
+      await Promise.all([fetchReservations(), refreshSession(reservation.sessionId)])
+      showToast("예약이 취소되었습니다.")
+    } catch (e) {
+      showToast(getErrorMessage(e), "error")
+    }
   }
 
-  return { reservations, resetReservations, handleReserve, handleWaitlist, handleCancel }
+  return { reservations, fetchReservations, handleReserve, handleWaitlist, handleCancel }
 }

@@ -1,22 +1,29 @@
 # 빵벙 (Bbangbung) — 프로젝트 가이드
 
-배드민턴 정모 예약 및 관리 앱. React + TypeScript + Vite, 현재 mock 데이터로 동작 중. 백엔드(Spring Boot + MySQL) 연동 예정.
+배드민턴 정모 예약 및 관리 앱. React + TypeScript + Vite 프론트엔드와 Java Spring Boot 백엔드로 구성. 현재 백엔드 API 연동 완료 상태.
 
 ---
 
 ## 기술 스택
 
+### 프론트엔드
 - **React 19** + **TypeScript** + **Vite 7**
 - **Tailwind CSS 4** + **shadcn/ui** (Vega 테마)
 - **Lucide React** 아이콘
+- **axios** — API 호출
 - 상태 관리: React `useState` / `useReducer` (외부 라이브러리 없음)
 - 라우팅: `App.tsx`의 `page` state 기반 수동 라우팅 (React Router 없음)
-- 백엔드: **Java 17 + Spring Boot 3.x** (예정) — 현재는 `src/data/mock.ts`의 목 데이터 사용
-- DB: **MySQL 8.0.35**
+
+### 백엔드
+- **Java 21** + **Spring Boot 3.5.13**
+- **Spring Data JPA** + **Hibernate**
+- **Spring Security** + **JWT** (jjwt 0.12.6)
+- **MySQL 8.0.35**
+- **Lombok**, Virtual Threads 활성화
 
 ---
 
-## 폴더 구조
+## 프론트엔드 폴더 구조
 
 ```
 src/
@@ -25,17 +32,17 @@ src/
 ├── types.ts                         # 모든 타입 정의
 │
 ├── data/
-│   └── mock.ts                      # 목 데이터 (members, sessions, reservations)
+│   └── mock.ts                      # (미사용) 구 목 데이터
 │
-├── hooks/                           # 비즈니스 로직 분리
-│   ├── useAuth.ts                   # 로그인, 회원가입, 로그아웃, 프로필 수정
+├── hooks/
+│   ├── useAuth.ts                   # 로그인, 회원가입, 로그아웃, 프로필/비밀번호 수정, 자동 로그인
 │   ├── useNavigation.ts             # 페이지 이동, selectedSessionId
 │   ├── useReservations.ts           # 예약, 대기 등록, 취소
 │   ├── useSessions.ts               # 세션 CRUD, 참가자 상태 변경
 │   └── useToast.ts                  # 토스트 메시지 상태
 │
 ├── pages/
-│   ├── Auth.tsx                     # 로그인 / 회원가입
+│   ├── Auth.tsx                     # 로그인 / 회원가입 (API 연동)
 │   ├── Onboarding.tsx               # 회원가입 직후 1회 표시되는 앱 안내 (3단계)
 │   ├── Home.tsx                     # 대시보드 (예정 모임, 입금 대기 알림)
 │   ├── SessionList.tsx              # 세션 목록 + 상태 필터
@@ -56,11 +63,119 @@ src/
 │       └── toast.tsx                # 성공/실패 피드백 토스트
 │
 └── lib/
+    ├── api.ts                       # axios 인스턴스 (baseURL, 토큰 자동 첨부)
     ├── badminton.ts                 # 도메인 상수 및 유틸
     │                                #   LEVEL_COLORS, STATUS_CONFIG
     │                                #   getLevelCounts, formatDate, formatFee
     └── utils.ts                     # cn(), formatPhone()
 ```
+
+---
+
+## 백엔드 폴더 구조
+
+```
+src/main/java/com/web/bbangbungbe/
+├── BbangbungBeApplication.java
+│
+├── entity/                          # JPA 엔티티 + Enum
+│   ├── Member.java                  # UUID PK, bcrypt 비밀번호
+│   ├── BbangSession.java            # 정모 세션
+│   ├── SessionParticipant.java      # 복합키 (session_id, member_id)
+│   ├── SessionParticipantId.java    # @Embeddable 복합키
+│   ├── Reservation.java             # 회원 예약 기록
+│   ├── Gender.java
+│   ├── BadmintonLevel.java
+│   ├── SessionStatus.java
+│   └── ReservationStatus.java
+│
+├── dto/
+│   ├── member/
+│   │   ├── MemberResponse.java      # password 제외한 회원 응답
+│   │   ├── SignupRequest.java
+│   │   ├── LoginRequest.java
+│   │   ├── LoginResponse.java       # { token, member }
+│   │   ├── UpdateProfileRequest.java
+│   │   └── ChangePasswordRequest.java
+│   ├── session/
+│   │   ├── SessionResponse.java     # organizer, participants 포함
+│   │   ├── SessionParticipantResponse.java
+│   │   ├── SessionCreateRequest.java
+│   │   └── StatusUpdateRequest.java
+│   └── reservation/
+│       ├── ReservationResponse.java
+│       └── ReservationRequest.java
+│
+├── repository/
+│   ├── MemberRepository.java
+│   ├── BbangSessionRepository.java  # @EntityGraph로 Lazy 로딩 처리
+│   ├── SessionParticipantRepository.java
+│   └── ReservationRepository.java   # @EntityGraph로 Lazy 로딩 처리
+│
+├── service/
+│   ├── MemberService.java           # 회원가입, 로그인, 프로필/비밀번호 수정
+│   ├── SessionService.java          # 세션 CRUD, 상태 변경
+│   └── ReservationService.java      # 예약/대기/취소, 상태 동기화 (upsert)
+│
+├── controller/
+│   ├── MemberController.java
+│   ├── SessionController.java
+│   └── ReservationController.java
+│
+├── security/
+│   ├── JwtUtil.java                 # 토큰 생성/검증
+│   ├── JwtFilter.java               # 요청마다 토큰 검증
+│   ├── SecurityConfig.java          # 인증/인가 설정, CORS
+│   ├── CorsConfig.java              # localhost:5173 허용
+│   ├── CustomUserDetailsService.java
+│   └── SecurityUtil.java            # getCurrentMemberId(), validateSelf()
+│
+├── exception/
+│   ├── BbangException.java          # 커스텀 예외
+│   ├── ErrorCode.java               # 에러 코드 enum (HTTP 상태 포함)
+│   ├── ErrorResponse.java           # { code, message }
+│   └── GlobalExceptionHandler.java  # @RestControllerAdvice
+│
+└── config/
+    └── JacksonConfig.java           # Hibernate6Module 등록
+```
+
+---
+
+## REST API 목록
+
+### 회원 (`/api/members`)
+| 메서드 | 경로 | 인증 | 설명 |
+|--------|------|------|------|
+| POST | `/signup` | 불필요 | 회원가입 |
+| POST | `/login` | 불필요 | 로그인 → `{ token, member }` |
+| GET | `/me` | 필요 | 토큰으로 내 정보 조회 (자동 로그인용) |
+| GET | `/` | ADMIN | 전체 회원 조회 |
+| GET | `/{id}` | 필요 | 단건 조회 |
+| PATCH | `/{id}` | 본인 | 프로필 수정 (level, phone) |
+| PATCH | `/{id}/password` | 본인 | 비밀번호 변경 (현재 비밀번호 검증) |
+
+### 세션 (`/api/sessions`)
+| 메서드 | 경로 | 인증 | 설명 |
+|--------|------|------|------|
+| GET | `/` | 불필요 | 전체 세션 조회 (`?status=open`) |
+| GET | `/upcoming` | 불필요 | 오늘 이후 세션 |
+| GET | `/{id}` | 불필요 | 단건 조회 |
+| POST | `/` | ADMIN | 세션 생성 |
+| PUT | `/{id}` | ADMIN | 세션 수정 |
+| PATCH | `/{id}/status` | ADMIN | 상태 변경 |
+| DELETE | `/{id}` | ADMIN | 세션 삭제 |
+
+### 예약 (`/api/reservations`)
+| 메서드 | 경로 | 인증 | 설명 |
+|--------|------|------|------|
+| GET | `/members/{memberId}` | 본인 | 내 예약 목록 |
+| POST | `/` | 본인 | 예약 신청 (pending) |
+| POST | `/waitlist` | 본인 | 대기 신청 (waitlisted) |
+| DELETE | `/` | 본인 | 예약 취소 |
+| PATCH | `/confirm` | ADMIN | 입금 확인 (pending → confirmed) |
+| PATCH | `/promote` | ADMIN | 대기자 승격 (waitlisted → pending) |
+| DELETE | `/admin` | ADMIN | 강제 취소 |
 
 ---
 
@@ -82,8 +197,6 @@ interface Reservation { id, sessionId, sessionTitle, date, startTime, endTime,
                         location, fee, status, createdAt }
 ```
 
-> `currentParticipants`는 `confirmed` 상태 참가자 수. UI에서는 항상 `participants.filter(p => p.status === "confirmed").length`로 직접 계산해서 표시.
-
 ---
 
 ## 상태 흐름
@@ -92,8 +205,10 @@ interface Reservation { id, sessionId, sessionTitle, date, startTime, endTime,
 ```
 (신청)     pending  →  (관리자 입금확인)  confirmed
 (대기신청) waitlisted → (관리자 승격)    pending  → confirmed
-모든 상태  →  (취소)  cancelled
+모든 상태  →  (취소)  cancelled  →  (재신청)  pending / waitlisted
 ```
+
+> 취소 후 재신청 시 기존 레코드를 재사용 (upsert) — UNIQUE 제약 유지
 
 ### 세션 상태 흐름
 ```
@@ -107,27 +222,30 @@ closed         → open (모집 재개)
 ## Hooks 역할 요약
 
 ### `useAuth`
-- `handleLogin(member)` — currentUser 설정
-- `handleSignup(data)` — 신규 member 생성 후 로그인
-- `handleLogout()` — currentUser null로 초기화
-- `handleUpdateProfile(updated)` — level, phone, password 수정
+- `authLoading` — 앱 시작 시 토큰 검증 중 여부 (자동 로그인)
+- `handleLogin(phone, password)` — API 로그인, 토큰 저장
+- `handleSignup(data)` — 회원가입 후 자동 로그인
+- `handleLogout()` — 토큰 삭제, currentUser null
+- `handleUpdateProfile(updated)` — level, phone 수정
+- `handleChangePassword(currentPassword, newPassword)` — 백엔드에서 현재 비밀번호 검증 후 변경
 
 ### `useSessions`
-- `addParticipant(sessionId, participant)` — 세션에 참가자 추가
-- `handleCreateSession(data)` — 세션 생성
-- `handleEditSession(sessionId, data)` — 세션 정보 수정
+- `fetchSessions()` — 전체 세션 API 조회
+- `refreshSession(sessionId)` — 단건 세션 갱신
+- `handleCreateSession(data, organizerId)` — 세션 생성
+- `handleEditSession(sessionId, data)` — 세션 수정
 - `handleDeleteSession(sessionId)` — 세션 삭제
 - `handleUpdateSessionStatus(sessionId, status)` — 세션 상태 변경
 - `handleConfirmPayment(sessionId, memberId)` — pending → confirmed
 - `handlePromoteFromWaitlist(sessionId, memberId)` — waitlisted → pending
 - `handleCancelParticipant(sessionId, memberId)` — 관리자 강제 취소
-- `handleCancelMyParticipant(sessionId, memberId)` — 본인 취소
-- 참가자 상태 변경 시 `currentParticipants`는 confirmed 수로 자동 재계산
+- 모든 함수에 try/catch + showToast 에러 처리
 
 ### `useReservations`
-- `handleReserve(sessionId)` — pending 예약 생성
-- `handleWaitlist(sessionId)` — waitlisted 예약 생성
-- `handleCancel(reservationId)` — 예약 cancelled 처리 + 참가자 상태도 동기화
+- `fetchReservations()` — 내 예약 API 조회
+- `handleReserve(sessionId)` — pending 예약
+- `handleWaitlist(sessionId)` — waitlisted 예약
+- `handleCancel(reservationId)` — 취소
 
 ### `useNavigation`
 - `navigate(page, sessionId?)` — 페이지 이동, scroll to top
@@ -142,9 +260,9 @@ closed         → open (모집 재개)
 ## 주요 페이지 동작
 
 ### Auth
-- 전화번호 + 비밀번호로 로그인
-- 회원가입: 이름 / 생년월일 / 성별 / 급수 / 전화번호 / 비밀번호
-- 중복 전화번호 체크 있음
+- 전화번호 + 비밀번호로 로그인 (API)
+- 회원가입: 이름 / 생년월일 / 성별 / 급수 / 전화번호 / 비밀번호 (API)
+- 로딩 상태 표시, 에러 toast
 
 ### Home
 - 예정 모임 (confirmed + pending + waitlisted) 카드 목록
@@ -162,17 +280,16 @@ closed         → open (모집 재개)
   - 상태 변경 버튼 (마감 / 재개 / 종료)
   - 수정 버튼 → CreateSession 수정 모드
   - 삭제 버튼 → ConfirmDialog 경유
-- **회원 관리 탭**: 이름/전화번호 검색, 성별 필터, 급수 필터
+- **회원 관리 탭**: API로 전체 회원 조회, 이름/전화번호 검색, 성별/급수 필터
 
 ### MyProfile
-- 프로필 수정, 비밀번호 변경
-- 화면 모드 전환 (라이트 / 다크 / 시스템) — `useTheme` 훅 사용
+- 프로필 수정 (level, phone) — API
+- 비밀번호 변경 — 백엔드에서 현재 비밀번호 bcrypt 검증
+- 화면 모드 전환 (라이트 / 다크 / 시스템) — `useTheme` 훅
 
 ### Onboarding
 - 회원가입 직후 `showOnboarding` 상태로 1회 표시
 - 3단계: 환영 → 예약 방법 → 추가 기능 안내
-- 급수 안내 단계 없음 (제거됨)
-- 단계 표시: 완료(bg-primary/40) / 현재(w-8 bg-primary) / 미완(bg-muted) 도트
 - 건너뛰기 버튼으로 언제든 종료 가능
 
 ### CreateSession
@@ -181,12 +298,21 @@ closed         → open (모집 재개)
 
 ---
 
+## 보안
+
+- JWT 토큰: `Authorization: Bearer {token}` 헤더로 전송
+- 토큰 payload: `{ sub: memberId, isAdmin, iat, exp }`
+- 만료: 24시간
+- `SecurityUtil.validateSelf()` — 본인 리소스 접근 검증 (예약, 프로필 수정)
+- 비밀번호: bcrypt 해시 저장, 평문 비교 없음
+
+---
+
 ## 다크모드
 
-`src/components/theme-provider.tsx`에 `ThemeProvider` + `useTheme` 훅 구현되어 있음.
+`src/components/theme-provider.tsx`에 `ThemeProvider` + `useTheme` 훅 구현.
 - `theme`: `"light" | "dark" | "system"`
 - `setTheme(theme)`: localStorage에 저장 + 즉시 적용
-- `MyProfile`에서 UI로 전환 가능
 
 ---
 
@@ -195,8 +321,6 @@ closed         → open (모집 재개)
 이모티콘, 색상 점 없이 **배경색으로만** 구분.
 - 남성: `bg-blue-50 / border-blue-200` 계열
 - 여성: `bg-pink-50 / border-pink-200` 계열
-
-텍스트로 표기할 때는 "남" / "여" 또는 "남성" / "여성" 그대로 사용.
 
 ## 급수 색상 (`LEVEL_COLORS`)
 
@@ -220,87 +344,32 @@ closed         → open (모집 재개)
 
 ### 완료
 - [x] 프로젝트 초기 세팅 (React 19 + TypeScript + Vite 7 + Tailwind CSS 4 + shadcn/ui)
-- [x] 목 데이터 설계 (`members`, `sessions`, `reservations`)
-- [x] 전체 페이지 구현 (Auth, Home, SessionList, SessionDetail, MyReservations, MyProfile, CreateSession, Admin)
+- [x] 전체 페이지 구현 (Auth, Home, SessionList, SessionDetail, MyReservations, MyProfile, CreateSession, Admin, Onboarding)
 - [x] 비즈니스 로직 hooks 분리 (useAuth, useSessions, useReservations, useNavigation, useToast)
-- [x] 예약 상태 흐름 구현 (pending → confirmed, waitlisted → pending → confirmed, 취소)
-- [x] 세션 상태 관리 (open ↔ closed, completed)
-- [x] 세션 CRUD (생성, 수정, 삭제)
 - [x] 공통 UI 컴포넌트 (ConfirmDialog, Toast, PasswordInput)
-- [x] 관리자 패널 (입금 확정, 대기자 승격, 강제 취소, 회원 검색/필터)
 - [x] 다크모드 (ThemeProvider, light/dark/system 전환)
-- [x] 온보딩 화면 (회원가입 직후 3단계 안내)
-- [x] currentParticipants 자동 재계산 (confirmed 수 기준)
-- [x] DB 스키마 설계 완료 (MySQL 8.0.35 기준 DDL 작성)
-- [x] MySQL DB 생성 완료
-- [x] 백엔드 스택 확정 (Java 21 + Spring Boot 3.5.13 + JPA + Spring Security + JWT)
-- [x] Spring Boot 프로젝트 생성 (IntelliJ)
-- [x] application.yml 설정 완료 (DB 연결, Virtual Threads 활성화)
-- [x] Spring Boot 실행 및 DB 연결 확인
-
-### 진행 중
-- [ ] Entity 클래스 작성
+- [x] DB 스키마 설계 및 MySQL DB 생성
+- [x] Spring Boot 프로젝트 세팅 (Java 21 + Spring Boot 3.5.13 + JPA + Security + JWT)
+- [x] Entity 클래스 작성 (Member, BbangSession, SessionParticipant, Reservation + Enum)
+- [x] Repository 작성 (@EntityGraph로 Lazy 로딩 처리)
+- [x] Service 작성 (MemberService, SessionService, ReservationService)
+- [x] Controller 작성 (MemberController, SessionController, ReservationController)
+- [x] DTO 작성 (Request/Response 분리, password 노출 방지)
+- [x] JWT 인증 (JwtUtil, JwtFilter, SecurityConfig, SecurityUtil)
+- [x] CORS 설정 (localhost:5173 허용)
+- [x] 에러 핸들링 (BbangException, ErrorCode, GlobalExceptionHandler)
+- [x] 입력값 검증 (@Valid + DTO 어노테이션)
+- [x] 프론트 API 연동 (axios, mock → API 교체)
+- [x] 로그인 유지 (토큰 자동 로그인, GET /api/members/me)
+- [x] 취소 후 재예약 처리 (upsert 방식)
+- [x] 비밀번호 변경 백엔드 검증 (bcrypt matches)
 
 ### 미착수
-- [ ] Repository / Service / Controller 구현
-- [ ] JWT 인증 적용
-- [ ] REST API 구현 (회원 → 인증 → 세션 → 예약 → 관리자 순)
-- [ ] 프론트 API 연동 (mock → axios/fetch 교체)
-- [ ] 실시간 업데이트 (Polling 또는 WebSocket)
+- [ ] 실시간 업데이트 (Polling)
 
 ---
 
-## 백엔드 연동 계획
+## 알려진 제약사항
 
-### 확정된 스택
-- **백엔드**: Java 21 + Spring Boot 3.5.13
-- **DB**: MySQL 8.0.35
-- **ORM**: Spring Data JPA
-- **인증**: Spring Security + JWT
-- **기타**: Lombok, Virtual Threads
-
-### Spring Boot 설정 (application.yml)
-```yaml
-spring:
-  datasource:
-    url: jdbc:mysql://localhost:3306/bbangbung?serverTimezone=Asia/Seoul&characterEncoding=UTF-8
-    driver-class-name: com.mysql.cj.jdbc.Driver
-  jpa:
-    hibernate:
-      ddl-auto: validate  # DDL은 직접 실행, JPA는 검증만
-    show-sql: true
-    open-in-view: false
-  threads:
-    virtual:
-      enabled: true  # Java 21 Virtual Threads
-server:
-  port: 8080
-```
-
-### DB 테이블 구조
-| 테이블 | 설명 |
-|--------|------|
-| `members` | 회원 (phone UNIQUE, password는 bcrypt 해시) |
-| `sessions` | 정모 세션 (level_restriction은 JSON 컬럼) |
-| `session_participants` | 세션 참가자 — (session_id, member_id) PK |
-| `reservations` | 회원 개인 예약 기록 — (member_id, session_id) UNIQUE |
-
-### 주요 설계 원칙
-- `current_participants` 컬럼 없음 — `session_participants`에서 `status = 'confirmed'` 집계
-- `reservations` ↔ `session_participants` 상태는 트리거로 자동 동기화
-- `organizer`는 `organizer_id` FK로 저장 (현재 mock에서는 이름 문자열)
-
-### 프론트 연동 시 변경 필요 사항
-- `src/data/mock.ts` → API 호출로 교체
-- 각 hook(`useAuth`, `useSessions`, `useReservations`)에서 `fetch` 또는 `axios` 사용
-- 실시간 업데이트: 초기엔 Polling, 이후 WebSocket(Socket.io) 검토
-
----
-
-## 알려진 제약사항 / 미구현
-
-- 백엔드 없음 — 새로고침 시 mock 데이터로 리셋 (백엔드 연동 전까지)
 - React Router 없음 — URL 변경 없음, 뒤로가기 미지원
-- 인증 보안 없음 — 비밀번호 평문 저장 (mock 전용, 백엔드 연동 시 bcrypt로 전환)
-- 세션 생성/수정 시 `organizer`는 현재 로그인 유저 이름으로 고정 (연동 시 ID로 전환)
-- 실시간 업데이트 미구현 — 현재 상태 변경은 해당 유저 화면만 즉시 반영
+- 실시간 업데이트 미구현 — 다른 유저의 상태 변경은 새로고침 전까지 반영 안 됨

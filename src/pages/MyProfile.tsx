@@ -14,6 +14,7 @@ const LEVELS: BadmintonLevel[] = ["S", "A", "B", "C", "D"]
 interface MyProfileProps {
   currentUser: Member
   onUpdate: (updated: Pick<Member, "level" | "phone" | "password">) => void
+  onChangePassword: (currentPassword: string, newPassword: string) => Promise<void>
   onLogout: () => void
 }
 
@@ -59,7 +60,7 @@ function profileReducer(state: ProfileState, action: ProfileAction): ProfileStat
   }
 }
 
-export function MyProfile({ currentUser, onUpdate, onLogout }: MyProfileProps) {
+export function MyProfile({ currentUser, onUpdate, onChangePassword, onLogout }: MyProfileProps) {
   const { theme, setTheme } = useTheme()
   const { toast, showToast, hideToast } = useToast()
   const [state, dispatch] = useReducer(profileReducer, {
@@ -85,14 +86,16 @@ export function MyProfile({ currentUser, onUpdate, onLogout }: MyProfileProps) {
     showToast("저장되었습니다")
   }
 
-  function handlePasswordSave() {
+  async function handlePasswordSave() {
     dispatch({ type: "SET_PW_ERROR", error: "" })
-    if (currentPw !== currentUser.password) { dispatch({ type: "SET_PW_ERROR", error: "현재 비밀번호가 올바르지 않습니다." }); return }
-    if (newPw.length < 6)                   { dispatch({ type: "SET_PW_ERROR", error: "새 비밀번호는 6자 이상이어야 합니다." }); return }
-    if (newPw !== confirmPw)                { dispatch({ type: "SET_PW_ERROR", error: "새 비밀번호가 일치하지 않습니다." }); return }
-    onUpdate({ level, phone, password: newPw })
-    dispatch({ type: "RESET_PW_FIELDS" })
-    showToast("비밀번호가 변경되었습니다")
+    if (newPw.length < 6)  { dispatch({ type: "SET_PW_ERROR", error: "새 비밀번호는 6자 이상이어야 합니다." }); return }
+    if (newPw !== confirmPw) { dispatch({ type: "SET_PW_ERROR", error: "새 비밀번호가 일치하지 않습니다." }); return }
+    try {
+      await onChangePassword(currentPw, newPw)
+      dispatch({ type: "RESET_PW_FIELDS" })
+    } catch {
+      dispatch({ type: "SET_PW_ERROR", error: "현재 비밀번호가 올바르지 않습니다." })
+    }
   }
 
   return (

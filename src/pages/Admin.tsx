@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Plus, Search, CalendarDays, MapPin, Users, Phone, ChevronRight, ChevronLeft, CheckCircle2, XCircle, Clock, ShieldOff, Pencil, Trash2, LockKeyhole, Unlock, Flag } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -8,19 +8,19 @@ import { cn } from "@/lib/utils"
 import { LEVEL_COLORS, STATUS_CONFIG, formatDate, formatFee } from "@/lib/badminton"
 import { useToast } from "@/hooks/useToast"
 import { CreateSession } from "@/pages/CreateSession"
+import api from "@/lib/api"
 import type { BadmintonLevel, BbangSession, Member, Page, SessionStatus } from "@/types"
 
 const LEVELS: BadmintonLevel[] = ["S", "A", "B", "C", "D"]
 
 interface AdminProps {
   sessions: BbangSession[]
-  members: Member[]
   currentUser: Member
   onNavigate: (page: Page, sessionId?: string) => void
   onConfirmPayment: (sessionId: string, memberId: string) => void
   onCancelParticipant: (sessionId: string, memberId: string) => void
   onPromoteFromWaitlist: (sessionId: string, memberId: string) => void
-  onCreateSession: (session: Omit<BbangSession, "id" | "currentParticipants" | "participants" | "status">) => void
+  onCreateSession: (session: Omit<BbangSession, "id" | "currentParticipants" | "participants" | "status">, organizerId: string) => void
   onUpdateSessionStatus: (sessionId: string, status: SessionStatus) => void
   onEditSession: (sessionId: string, data: Omit<BbangSession, "id" | "currentParticipants" | "participants" | "status">) => void
   onDeleteSession: (sessionId: string) => void
@@ -29,7 +29,7 @@ interface AdminProps {
 type AdminTab = "sessions" | "members"
 type SessionsView = "list" | "create" | "edit" | "detail"
 
-export function Admin({ sessions, members, currentUser, onNavigate, onConfirmPayment, onCancelParticipant, onPromoteFromWaitlist, onCreateSession, onUpdateSessionStatus, onEditSession, onDeleteSession }: AdminProps) {
+export function Admin({ sessions, currentUser, onNavigate, onConfirmPayment, onCancelParticipant, onPromoteFromWaitlist, onCreateSession, onUpdateSessionStatus, onEditSession, onDeleteSession }: AdminProps) {
   if (!currentUser.isAdmin) {
     return (
       <div className="flex flex-col items-center justify-center gap-4 py-24 text-center">
@@ -49,6 +49,23 @@ export function Admin({ sessions, members, currentUser, onNavigate, onConfirmPay
   const [memberSearch, setMemberSearch] = useState("")
   const [levelFilter, setLevelFilter] = useState<BadmintonLevel | "all">("all")
   const [genderFilter, setGenderFilter] = useState<"all" | "male" | "female">("all")
+  const [members, setMembers] = useState<Member[]>([])
+
+  useEffect(() => {
+    api.get("/members").then(({ data }) => {
+      setMembers(data.map((m: any): Member => ({
+        id: m.id,
+        name: m.name,
+        birthdate: m.birthdate,
+        gender: m.gender,
+        level: m.level,
+        phone: m.phone,
+        password: m.password,
+        joinedAt: m.joinedAt,
+        isAdmin: m.admin,
+      })))
+    })
+  }, [])
 
   const filteredMembers = members.filter((m) => {
     const matchSearch = memberSearch === "" || m.name.includes(memberSearch) || m.phone.includes(memberSearch)
@@ -66,7 +83,7 @@ export function Admin({ sessions, members, currentUser, onNavigate, onConfirmPay
       <CreateSession
         organizer={currentUser.name}
         onSubmit={(data) => {
-          onCreateSession(data)
+          onCreateSession(data, currentUser.id)
           setSessionsView("list")
         }}
         onBack={() => setSessionsView("list")}
