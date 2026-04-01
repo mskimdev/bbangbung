@@ -14,6 +14,7 @@ import { useSessions } from "@/hooks/useSessions"
 import { useReservations } from "@/hooks/useReservations"
 import { useNavigation } from "@/hooks/useNavigation"
 import { useToast } from "@/hooks/useToast"
+import { useSessionSse } from "@/hooks/useSessionSse"
 
 export default function App() {
   const [showOnboarding, setShowOnboarding] = useState(false)
@@ -23,6 +24,7 @@ export default function App() {
 
   const {
     sessions,
+    setSessions,
     refreshSession,
     handleCreateSession,
     handleConfirmPayment,
@@ -38,6 +40,17 @@ export default function App() {
 
   const { reservations, handleReserve, handleWaitlist, handleCancel } =
     useReservations(currentUser, refreshSession, showToast)
+
+  // SessionDetail이 열려 있을 때만 해당 세션 SSE 구독 (early return 이전에 위치해야 Rules of Hooks 준수)
+  useSessionSse(
+    page === "session-detail" ? selectedSessionId : null,
+    (updated) => setSessions((prev) => prev.map((s) => (s.id === updated.id ? updated : s))),
+    () => {
+      setSessions((prev) => prev.filter((s) => s.id !== selectedSessionId))
+      navigate("sessions")
+      showToast("삭제된 정모입니다.", "error")
+    },
+  )
 
   async function handleLogoutAndReset() {
     handleLogout()
@@ -107,6 +120,7 @@ export default function App() {
             onUpdateSessionStatus={handleUpdateSessionStatus}
             onEditSession={handleEditSession}
             onDeleteSession={(sessionId) => { handleDeleteSession(sessionId); navigate("admin") }}
+            showToast={showToast}
           />
         )}
       </main>

@@ -11,6 +11,7 @@
 - **Tailwind CSS 4** + **shadcn/ui** (Vega 테마)
 - **Lucide React** 아이콘
 - **axios** — API 호출
+- **EventSource (브라우저 내장)** — SSE 실시간 업데이트
 - 상태 관리: React `useState` / `useReducer` (외부 라이브러리 없음)
 - 라우팅: `App.tsx`의 `page` state 기반 수동 라우팅 (React Router 없음)
 
@@ -39,6 +40,7 @@ src/
 │   ├── useNavigation.ts             # 페이지 이동, selectedSessionId
 │   ├── useReservations.ts           # 예약, 대기 등록, 취소
 │   ├── useSessions.ts               # 세션 CRUD, 참가자 상태 변경
+│   ├── useSessionSse.ts             # SSE 구독 — SessionDetail 오픈 시 실시간 세션 업데이트
 │   └── useToast.ts                  # 토스트 메시지 상태
 │
 ├── pages/
@@ -114,8 +116,9 @@ src/main/java/com/web/bbangbungbe/
 │
 ├── service/
 │   ├── MemberService.java           # 회원가입, 로그인, 프로필/비밀번호 수정
-│   ├── SessionService.java          # 세션 CRUD, 상태 변경
-│   └── ReservationService.java      # 예약/대기/취소, 상태 동기화 (upsert)
+│   ├── SessionService.java          # 세션 CRUD, 상태 변경 (변경 시 SSE notify)
+│   ├── ReservationService.java      # 예약/대기/취소, 상태 동기화 (upsert) (변경 시 SSE notify)
+│   └── SessionSseService.java       # SseEmitter 관리, 세션별 구독자에게 push
 │
 ├── controller/
 │   ├── MemberController.java
@@ -161,6 +164,7 @@ src/main/java/com/web/bbangbungbe/
 | GET | `/` | 불필요 | 전체 세션 조회 (`?status=open`) |
 | GET | `/upcoming` | 불필요 | 오늘 이후 세션 |
 | GET | `/{id}` | 불필요 | 단건 조회 |
+| GET | `/{id}/stream` | 불필요 | SSE 구독 — 세션 실시간 업데이트 |
 | POST | `/` | ADMIN | 세션 생성 |
 | PUT | `/{id}` | ADMIN | 세션 수정 |
 | PATCH | `/{id}/status` | ADMIN | 상태 변경 |
@@ -241,6 +245,11 @@ closed         → open (모집 재개)
 - `handleCancelParticipant(sessionId, memberId)` — 관리자 강제 취소
 - 모든 함수에 try/catch + showToast 에러 처리
 
+### `useSessionSse`
+- `sessionId` — null이면 구독 안 함 (page가 session-detail일 때만 활성)
+- `onUpdate(session)` — session-update 이벤트 수신 시 호출
+- `onDeleted()` — session-deleted 이벤트 수신 시 호출 (세션 목록으로 이동 + 토스트)
+
 ### `useReservations`
 - `fetchReservations()` — 내 예약 API 조회
 - `handleReserve(sessionId)` — pending 예약
@@ -273,6 +282,8 @@ closed         → open (모집 재개)
 - 참가 현황 (진행 바, 성별 통계, 레벨 분포)
 - Sticky CTA: 상태에 따라 신청 / 대기신청 / 취소 / 비활성 표시
 - 취소 시 ConfirmDialog 경유
+- 신청/대기/취소 버튼 API 호출 중 `actionLoading` 으로 중복 클릭 방지
+- SSE 구독 중 세션 삭제 시 sessions 페이지로 자동 이동
 
 ### Admin
 - **정모 관리 탭**: 세션 목록 → 세션 상세
@@ -280,7 +291,9 @@ closed         → open (모집 재개)
   - 상태 변경 버튼 (마감 / 재개 / 종료)
   - 수정 버튼 → CreateSession 수정 모드
   - 삭제 버튼 → ConfirmDialog 경유
+  - 모든 액션 버튼 API 호출 중 `loadingId` 로 중복 클릭 방지 (멤버별 개별 비활성화)
 - **회원 관리 탭**: API로 전체 회원 조회, 이름/전화번호 검색, 성별/급수 필터
+  - 조회 중 스켈레톤 로딩 표시, 실패 시 에러 토스트
 
 ### MyProfile
 - 프로필 수정 (level, phone) — API
@@ -364,12 +377,26 @@ closed         → open (모집 재개)
 - [x] 취소 후 재예약 처리 (upsert 방식)
 - [x] 비밀번호 변경 백엔드 검증 (bcrypt matches)
 
-### 미착수
-- [ ] 실시간 업데이트 (Polling)
+### 완료 (추가)
+- [x] 실시간 업데이트 (SSE) — `GET /api/sessions/{id}/stream`, `useSessionSse` 훅, SessionDetail 오픈 시 자동 구독/해제
+- [x] SSE 세션 삭제 이벤트 (`session-deleted`) — 삭제 시 구독자에게 push, 프론트 자동 이동
+- [x] 버튼 중복 클릭 방지 — SessionDetail(`actionLoading`), Admin(`loadingId`) 로딩 상태
+- [x] 토스트 중복 제거 — SessionDetail/Admin 내부 showToast 호출 제거, 훅에서 단일 처리
+- [x] 날짜 비교 버그 수정 — `new Date(str)` UTC 파싱 → `toLocaleDateString("sv")` 문자열 비교
+- [x] Admin 회원 목록 에러 처리 — 조회 실패 시 에러 토스트, 로딩 중 스켈레톤 표시
+
+---
+
+## 미해결 보완 항목
+
+1. **`MyProfile` 토스트 중복** — `handleInfoSave`의 `showToast` + `useAuth.handleUpdateProfile`의 `showToast` 동시 호출. `MyProfile` 내부 호출 제거 필요.
+2. **`MyProfile` 저장 버튼 로딩 상태 없음** — `handleInfoSave`, `handlePasswordSave` API 호출 중 버튼 비활성화 미처리.
+3. **SSE 재연결 시 데이터 동기화 없음** — 타임아웃(3분) 후 브라우저 자동 재연결 시 최신 세션 상태가 반영되지 않음. `connected` 이벤트 수신 시 `refreshSession` 호출로 동기화 필요.
+4. **`Admin` Rules of Hooks 위반** — `!currentUser.isAdmin` early return 이후에 `useState`/`useEffect` 호출. hooks를 early return 위로 이동 필요.
+5. **`useReservations`에서 `refreshSession` 중복 호출** — 예약/취소 시 REST `refreshSession` + SSE `session-update`가 동시에 세션을 업데이트. SSE가 있으므로 `refreshSession` 호출 제거 가능.
 
 ---
 
 ## 알려진 제약사항
 
 - React Router 없음 — URL 변경 없음, 뒤로가기 미지원
-- 실시간 업데이트 미구현 — 다른 유저의 상태 변경은 새로고침 전까지 반영 안 됨

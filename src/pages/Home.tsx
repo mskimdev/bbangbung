@@ -25,15 +25,15 @@ const RESERVATION_BADGE = {
 }
 
 export function Home({ currentUser, sessions, reservations, onNavigate }: HomeProps) {
-  const today = new Date()
+  const todayStr = new Date().toLocaleDateString("sv") // "YYYY-MM-DD" 로컬 기준
   const upcomingSessions = sessions
-    .filter((s) => s.status === "open" && new Date(s.date) >= today)
-    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+    .filter((s) => s.status === "open" && s.date >= todayStr)
+    .sort((a, b) => a.date.localeCompare(b.date))
     .slice(0, 3)
 
   const activeReservations = reservations
-    .filter((r) => (r.status === "confirmed" || r.status === "pending" || r.status === "waitlisted") && new Date(r.date) >= today)
-    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+    .filter((r) => (r.status === "confirmed" || r.status === "pending" || r.status === "waitlisted") && r.date >= todayStr)
+    .sort((a, b) => a.date.localeCompare(b.date))
 
   const pendingCount = activeReservations.filter((r) => r.status === "pending").length
   const confirmedCount = activeReservations.filter((r) => r.status === "confirmed").length

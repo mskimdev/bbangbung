@@ -3,10 +3,8 @@ import { Plus, Search, CalendarDays, MapPin, Users, Phone, ChevronRight, Chevron
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
-import { Toast } from "@/components/ui/toast"
 import { cn } from "@/lib/utils"
 import { LEVEL_COLORS, STATUS_CONFIG, formatDate, formatFee } from "@/lib/badminton"
-import { useToast } from "@/hooks/useToast"
 import { CreateSession } from "@/pages/CreateSession"
 import api from "@/lib/api"
 import type { BadmintonLevel, BbangSession, Member, Page, SessionStatus } from "@/types"
@@ -17,19 +15,20 @@ interface AdminProps {
   sessions: BbangSession[]
   currentUser: Member
   onNavigate: (page: Page, sessionId?: string) => void
-  onConfirmPayment: (sessionId: string, memberId: string) => void
-  onCancelParticipant: (sessionId: string, memberId: string) => void
-  onPromoteFromWaitlist: (sessionId: string, memberId: string) => void
+  onConfirmPayment: (sessionId: string, memberId: string) => Promise<void>
+  onCancelParticipant: (sessionId: string, memberId: string) => Promise<void>
+  onPromoteFromWaitlist: (sessionId: string, memberId: string) => Promise<void>
   onCreateSession: (session: Omit<BbangSession, "id" | "currentParticipants" | "participants" | "status">, organizerId: string) => void
-  onUpdateSessionStatus: (sessionId: string, status: SessionStatus) => void
+  onUpdateSessionStatus: (sessionId: string, status: SessionStatus) => Promise<void>
   onEditSession: (sessionId: string, data: Omit<BbangSession, "id" | "currentParticipants" | "participants" | "status">) => void
   onDeleteSession: (sessionId: string) => void
+  showToast: (message: string, type?: "success" | "error") => void
 }
 
 type AdminTab = "sessions" | "members"
 type SessionsView = "list" | "create" | "edit" | "detail"
 
-export function Admin({ sessions, currentUser, onNavigate, onConfirmPayment, onCancelParticipant, onPromoteFromWaitlist, onCreateSession, onUpdateSessionStatus, onEditSession, onDeleteSession }: AdminProps) {
+export function Admin({ sessions, currentUser, onNavigate, onConfirmPayment, onCancelParticipant, onPromoteFromWaitlist, onCreateSession, onUpdateSessionStatus, onEditSession, onDeleteSession, showToast }: AdminProps) {
   if (!currentUser.isAdmin) {
     return (
       <div className="flex flex-col items-center justify-center gap-4 py-24 text-center">
@@ -50,21 +49,26 @@ export function Admin({ sessions, currentUser, onNavigate, onConfirmPayment, onC
   const [levelFilter, setLevelFilter] = useState<BadmintonLevel | "all">("all")
   const [genderFilter, setGenderFilter] = useState<"all" | "male" | "female">("all")
   const [members, setMembers] = useState<Member[]>([])
+  const [membersLoading, setMembersLoading] = useState(false)
 
   useEffect(() => {
-    api.get("/members").then(({ data }) => {
-      setMembers(data.map((m: any): Member => ({
-        id: m.id,
-        name: m.name,
-        birthdate: m.birthdate,
-        gender: m.gender,
-        level: m.level,
-        phone: m.phone,
-        password: m.password,
-        joinedAt: m.joinedAt,
-        isAdmin: m.admin,
-      })))
-    })
+    setMembersLoading(true)
+    api.get("/members")
+      .then(({ data }) => {
+        setMembers(data.map((m: any): Member => ({
+          id: m.id,
+          name: m.name,
+          birthdate: m.birthdate,
+          gender: m.gender,
+          level: m.level,
+          phone: m.phone,
+          password: m.password,
+          joinedAt: m.joinedAt,
+          isAdmin: m.admin,
+        })))
+      })
+      .catch(() => showToast("회원 목록을 불러오지 못했습니다.", "error"))
+      .finally(() => setMembersLoading(false))
   }, [])
 
   const filteredMembers = members.filter((m) => {
@@ -166,6 +170,7 @@ export function Admin({ sessions, currentUser, onNavigate, onConfirmPayment, onC
               genderFilter={genderFilter}
               onGenderFilter={setGenderFilter}
               levelStats={levelStats}
+              loading={membersLoading}
             />
           )}
         </>
@@ -179,16 +184,16 @@ function SessionPaymentManager({
   session, onConfirm, onCancel, onPromote, onUpdateStatus, onEdit, onDelete,
 }: {
   session: BbangSession
-  onConfirm: (memberId: string) => void
-  onCancel: (memberId: string) => void
-  onPromote: (memberId: string) => void
-  onUpdateStatus: (status: SessionStatus) => void
+  onConfirm: (memberId: string) => Promise<void>
+  onCancel: (memberId: string) => Promise<void>
+  onPromote: (memberId: string) => Promise<void>
+  onUpdateStatus: (status: SessionStatus) => Promise<void>
   onEdit: () => void
   onDelete: () => void
 }) {
   const [cancelTarget, setCancelTarget] = useState<{ memberId: string; name: string } | null>(null)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
-  const { toast, showToast, hideToast } = useToast()
+  const [loadingId, setLoadingId] = useState<string | null>(null)
 
   const pending   = session.participants.filter((p) => p.status === "pending")
   const confirmed = session.participants.filter((p) => p.status === "confirmed")
@@ -223,18 +228,30 @@ function SessionPaymentManager({
         {/* 상태 변경 */}
         <div className="mt-3 flex flex-wrap gap-2 border-t border-border pt-3">
           {session.status === "open" && (
-            <Button size="sm" variant="outline" onClick={() => { onUpdateStatus("closed"); showToast("모집 마감으로 변경됨") }}>
-              <LockKeyhole className="size-3.5" />모집 마감
+            <Button size="sm" variant="outline" disabled={loadingId === "status"} onClick={async () => {
+              setLoadingId("status")
+              await onUpdateStatus("closed")
+              setLoadingId(null)
+            }}>
+              <LockKeyhole className="size-3.5" />{loadingId === "status" ? "처리 중..." : "모집 마감"}
             </Button>
           )}
           {session.status === "closed" && (
-            <Button size="sm" variant="outline" onClick={() => { onUpdateStatus("open"); showToast("모집 중으로 변경됨") }}>
-              <Unlock className="size-3.5" />모집 재개
+            <Button size="sm" variant="outline" disabled={loadingId === "status"} onClick={async () => {
+              setLoadingId("status")
+              await onUpdateStatus("open")
+              setLoadingId(null)
+            }}>
+              <Unlock className="size-3.5" />{loadingId === "status" ? "처리 중..." : "모집 재개"}
             </Button>
           )}
           {session.status !== "completed" && session.status !== "cancelled" && (
-            <Button size="sm" variant="outline" onClick={() => { onUpdateStatus("completed"); showToast("종료로 변경됨") }}>
-              <Flag className="size-3.5" />종료 처리
+            <Button size="sm" variant="outline" disabled={loadingId === "status"} onClick={async () => {
+              setLoadingId("status")
+              await onUpdateStatus("completed")
+              setLoadingId(null)
+            }}>
+              <Flag className="size-3.5" />{loadingId === "status" ? "처리 중..." : "종료 처리"}
             </Button>
           )}
           <div className="ml-auto flex gap-2">
@@ -267,8 +284,12 @@ function SessionPaymentManager({
                   <span className="text-xs text-muted-foreground">신청일: {p.reservedAt}</span>
                 </div>
                 <div className="flex gap-1.5">
-                  <Button size="sm" onClick={() => { onConfirm(p.memberId); showToast(`${p.memberName} 입금 확정`) }}><CheckCircle2 className="size-3.5" />확정</Button>
-                  <Button size="sm" variant="destructive" onClick={() => setCancelTarget({ memberId: p.memberId, name: p.memberName })}><XCircle className="size-3.5" />취소</Button>
+                  <Button size="sm" disabled={loadingId === p.memberId} onClick={async () => {
+                    setLoadingId(p.memberId)
+                    await onConfirm(p.memberId)
+                    setLoadingId(null)
+                  }}><CheckCircle2 className="size-3.5" />{loadingId === p.memberId ? "처리 중..." : "확정"}</Button>
+                  <Button size="sm" variant="destructive" disabled={loadingId === p.memberId} onClick={() => setCancelTarget({ memberId: p.memberId, name: p.memberName })}><XCircle className="size-3.5" />취소</Button>
                 </div>
               </div>
             ))}
@@ -294,8 +315,12 @@ function SessionPaymentManager({
                   <span className="text-xs text-muted-foreground">대기 신청일: {p.reservedAt}</span>
                 </div>
                 <div className="flex gap-1.5">
-                  <Button size="sm" variant="outline" onClick={() => { onPromote(p.memberId); showToast(`${p.memberName} 입금 요청 전환`) }}>입금요청</Button>
-                  <Button size="sm" variant="destructive" onClick={() => setCancelTarget({ memberId: p.memberId, name: p.memberName })}><XCircle className="size-3.5" /></Button>
+                  <Button size="sm" variant="outline" disabled={loadingId === p.memberId} onClick={async () => {
+                    setLoadingId(p.memberId)
+                    await onPromote(p.memberId)
+                    setLoadingId(null)
+                  }}>{loadingId === p.memberId ? "처리 중..." : "입금요청"}</Button>
+                  <Button size="sm" variant="destructive" disabled={loadingId === p.memberId} onClick={() => setCancelTarget({ memberId: p.memberId, name: p.memberName })}><XCircle className="size-3.5" /></Button>
                 </div>
               </div>
             ))}
@@ -331,7 +356,13 @@ function SessionPaymentManager({
         <ConfirmDialog
           message={`${cancelTarget.name} 님의 참가를 취소하시겠습니까?`}
           confirmLabel="참가 취소"
-          onConfirm={() => { onCancel(cancelTarget.memberId); showToast(`${cancelTarget.name} 참가 취소됨`); setCancelTarget(null) }}
+          onConfirm={async () => {
+            const memberId = cancelTarget.memberId
+            setCancelTarget(null)
+            setLoadingId(memberId)
+            await onCancel(memberId)
+            setLoadingId(null)
+          }}
           onCancel={() => setCancelTarget(null)}
         />
       )}
@@ -343,7 +374,6 @@ function SessionPaymentManager({
           onCancel={() => setShowDeleteConfirm(false)}
         />
       )}
-      {toast && <Toast message={toast.message} type={toast.type} onClose={hideToast} />}
     </div>
   )
 }
@@ -409,7 +439,7 @@ function SessionsAdmin({
 
 /* ── 회원 관리 ───────────────────────────────────────── */
 function MembersAdmin({
-  members, allMembers, search, onSearch, levelFilter, onLevelFilter, genderFilter, onGenderFilter, levelStats,
+  members, allMembers, search, onSearch, levelFilter, onLevelFilter, genderFilter, onGenderFilter, levelStats, loading,
 }: {
   members: Member[]
   allMembers: Member[]
@@ -420,7 +450,18 @@ function MembersAdmin({
   genderFilter: "all" | "male" | "female"
   onGenderFilter: (v: "all" | "male" | "female") => void
   levelStats: { level: BadmintonLevel; count: number }[]
+  loading: boolean
 }) {
+  if (loading) {
+    return (
+      <div className="flex flex-col gap-3 py-8">
+        {[...Array(4)].map((_, i) => (
+          <div key={i} className="h-16 animate-pulse rounded-xl bg-muted" />
+        ))}
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-col gap-4">
       <div className="grid grid-cols-5 gap-2">

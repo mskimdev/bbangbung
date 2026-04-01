@@ -168,6 +168,7 @@ export function useSessions(showToast: ShowToast) {
 
   return {
     sessions,
+    setSessions,
     fetchSessions,
     refreshSession,
     handleCreateSession,

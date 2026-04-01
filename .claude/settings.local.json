@@ -3,7 +3,11 @@
     "allow": [
       "Bash(npm run:*)",
       "Bash(npx tsc:*)",
-      "Bash(wc -l /Users/kimminsu/Desktop/bbang-test/bbangbung/src/pages/*.tsx)"
+      "Bash(wc -l /Users/kimminsu/Desktop/bbang-test/bbangbung/src/pages/*.tsx)",
+      "Bash(xargs cat:*)",
+      "Bash(ls /Users/kimminsu/Desktop/bbang-test/스크린샷*)",
+      "Bash(ls /Users/kimminsu/Desktop/bbang-test/bbangbung/스크린샷*)",
+      "Read(//Users/kimminsu/Desktop/**)"
     ]
   }
 }

@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { CalendarDays, BanknoteIcon, CheckCircle2, MapPin, Users, Clock } from "lucide-react"
+import { CalendarDays, BanknoteIcon, CheckCircle2, MapPin, Users } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 

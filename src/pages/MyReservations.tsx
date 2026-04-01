@@ -26,12 +26,12 @@ export function MyReservations({ reservations, onNavigate, onCancel }: MyReserva
   const [tab, setTab] = useState<Tab>("upcoming")
   const [confirmId, setConfirmId] = useState<string | null>(null)
 
-  const today = new Date()
+  const todayStr = new Date().toLocaleDateString("sv") // "YYYY-MM-DD" 로컬 기준
   const upcoming = reservations.filter(
-    (r) => r.status !== "cancelled" && new Date(r.date) >= today
+    (r) => r.status !== "cancelled" && r.date >= todayStr
   )
   const past = reservations.filter(
-    (r) => r.status === "cancelled" || new Date(r.date) < today
+    (r) => r.status === "cancelled" || r.date < todayStr
   )
 
   const list = tab === "upcoming" ? upcoming : past
@@ -62,7 +62,7 @@ export function MyReservations({ reservations, onNavigate, onCancel }: MyReserva
       <div className="flex flex-col gap-3">
         {list.map((res) => {
           const statusCfg = STATUS_BADGE[res.status]
-          const isPast = new Date(res.date) < today
+          const isPast = res.date < todayStr
           return (
             <div
               key={res.id}

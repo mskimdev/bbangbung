@@ -1,12 +1,10 @@
 import { useState } from "react"
-import { ChevronLeft, MapPin, CalendarDays, Clock, Users, Layers, BanknoteIcon } from "lucide-react"
+import { ChevronLeft, MapPin, CalendarDays, Users, Layers, BanknoteIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
-import { Toast } from "@/components/ui/toast"
 import { cn } from "@/lib/utils"
 import { LEVEL_COLORS, STATUS_CONFIG, getLevelCounts, formatDate, formatFee } from "@/lib/badminton"
-import { useToast } from "@/hooks/useToast"
 import type { BadmintonLevel, BbangSession, Member, Page, Reservation } from "@/types"
 
 const LEVELS: BadmintonLevel[] = ["S", "A", "B", "C", "D"]
@@ -16,9 +14,9 @@ interface SessionDetailProps {
   currentUser: Member
   reservations: Reservation[]
   onNavigate: (page: Page, sessionId?: string) => void
-  onReserve: (sessionId: string) => void
-  onWaitlist: (sessionId: string) => void
-  onCancel: (reservationId: string) => void
+  onReserve: (sessionId: string) => Promise<void>
+  onWaitlist: (sessionId: string) => Promise<void>
+  onCancel: (reservationId: string) => Promise<void>
 }
 
 export function SessionDetail({
@@ -31,7 +29,7 @@ export function SessionDetail({
   onCancel,
 }: SessionDetailProps) {
   const [showCancelConfirm, setShowCancelConfirm] = useState(false)
-  const { toast, showToast, hideToast } = useToast()
+  const [actionLoading, setActionLoading] = useState(false)
 
   const status = STATUS_CONFIG[session.status]
   const levelCounts = getLevelCounts(session)
@@ -227,7 +225,7 @@ export function SessionDetail({
                 <p className="text-sm font-medium text-primary">예약 확정</p>
                 <p className="text-xs text-muted-foreground">참가비 {formatFee(session.fee)} 납부 완료</p>
               </div>
-              <Button variant="destructive" onClick={() => setShowCancelConfirm(true)}>예약 취소</Button>
+              <Button variant="destructive" disabled={actionLoading} onClick={() => setShowCancelConfirm(true)}>예약 취소</Button>
             </div>
           ) : myParticipant?.status === "pending" && myReservation ? (
             <div className="flex items-center gap-3">
@@ -235,7 +233,7 @@ export function SessionDetail({
                 <p className="text-sm font-medium text-amber-600">입금 확인 중</p>
                 <p className="text-xs text-muted-foreground">관리자가 확인 후 확정됩니다</p>
               </div>
-              <Button variant="outline" onClick={() => setShowCancelConfirm(true)}>취소</Button>
+              <Button variant="outline" disabled={actionLoading} onClick={() => setShowCancelConfirm(true)}>취소</Button>
             </div>
           ) : myParticipant?.status === "waitlisted" && myReservation ? (
             <div className="flex items-center gap-3">
@@ -243,7 +241,7 @@ export function SessionDetail({
                 <p className="text-sm font-medium">대기 {myWaitlistPosition}번째</p>
                 <p className="text-xs text-muted-foreground">자리가 나면 관리자가 입금 요청을 드립니다</p>
               </div>
-              <Button variant="outline" onClick={() => setShowCancelConfirm(true)}>대기 취소</Button>
+              <Button variant="outline" disabled={actionLoading} onClick={() => setShowCancelConfirm(true)}>대기 취소</Button>
             </div>
           ) : !levelAllowed ? (
             <div className="rounded-xl bg-muted px-4 py-3 text-center text-sm text-muted-foreground">
@@ -254,12 +252,20 @@ export function SessionDetail({
               {session.status === "completed" ? "종료된 모임입니다" : "모집이 마감되었습니다"}
             </div>
           ) : spotsLeft > 0 ? (
-            <Button className="w-full" size="lg" onClick={() => { onReserve(session.id); showToast("신청이 완료되었습니다") }}>
-              신청하기 · {formatFee(session.fee)} 계좌이체
+            <Button className="w-full" size="lg" disabled={actionLoading} onClick={async () => {
+              setActionLoading(true)
+              await onReserve(session.id)
+              setActionLoading(false)
+            }}>
+              {actionLoading ? "신청 중..." : `신청하기 · ${formatFee(session.fee)} 계좌이체`}
             </Button>
           ) : (
-            <Button className="w-full" size="lg" variant="outline" onClick={() => { onWaitlist(session.id); showToast("대기 신청이 완료되었습니다") }}>
-              대기 신청하기 (현재 대기 {waitlistedParticipants.length}명)
+            <Button className="w-full" size="lg" variant="outline" disabled={actionLoading} onClick={async () => {
+              setActionLoading(true)
+              await onWaitlist(session.id)
+              setActionLoading(false)
+            }}>
+              {actionLoading ? "신청 중..." : `대기 신청하기 (현재 대기 ${waitlistedParticipants.length}명)`}
             </Button>
           )}
         </div>
@@ -269,11 +275,15 @@ export function SessionDetail({
         <ConfirmDialog
           message="예약을 취소하시겠습니까?"
           confirmLabel="예약 취소"
-          onConfirm={() => { onCancel(myReservation.id); setShowCancelConfirm(false); showToast("예약이 취소되었습니다") }}
+          onConfirm={async () => {
+            setActionLoading(true)
+            setShowCancelConfirm(false)
+            await onCancel(myReservation.id)
+            setActionLoading(false)
+          }}
           onCancel={() => setShowCancelConfirm(false)}
         />
       )}
-      {toast && <Toast message={toast.message} type={toast.type} onClose={hideToast} />}
     </div>
   )
 }
