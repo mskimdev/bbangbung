@@ -1,8 +1,12 @@
+import { useState } from "react"
 import { ChevronLeft, MapPin, CalendarDays, Clock, Users, Layers, BanknoteIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { Toast } from "@/components/ui/toast"
 import { cn } from "@/lib/utils"
 import { LEVEL_COLORS, STATUS_CONFIG, getLevelCounts, formatDate, formatFee } from "@/lib/badminton"
+import { useToast } from "@/hooks/useToast"
 import type { BadmintonLevel, BbangSession, Member, Page, Reservation } from "@/types"
 
 const LEVELS: BadmintonLevel[] = ["S", "A", "B", "C", "D"]
@@ -26,6 +30,9 @@ export function SessionDetail({
   onWaitlist,
   onCancel,
 }: SessionDetailProps) {
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false)
+  const { toast, showToast, hideToast } = useToast()
+
   const status = STATUS_CONFIG[session.status]
   const levelCounts = getLevelCounts(session)
 
@@ -115,7 +122,7 @@ export function SessionDetail({
         <div className="mb-2 flex items-center justify-between text-sm">
           <span className="font-semibold">참가 현황</span>
           <span className="text-muted-foreground">
-            확정 {session.currentParticipants}/{session.maxParticipants}명
+            확정 {confirmedParticipants.length}/{session.maxParticipants}명
             {pendingParticipants.length > 0 && (
               <span className="ml-1 text-amber-600">(입금대기 {pendingParticipants.length})</span>
             )}
@@ -139,14 +146,12 @@ export function SessionDetail({
         {/* Gender & level stats */}
         <div className="mb-4 flex gap-2">
           <div className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-blue-50 py-3 dark:bg-blue-900/20">
-            <span className="text-lg">👨</span>
             <div>
               <p className="text-xs text-muted-foreground">남</p>
               <p className="font-bold text-blue-700 dark:text-blue-300">{maleCount}명</p>
             </div>
           </div>
           <div className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-pink-50 py-3 dark:bg-pink-900/20">
-            <span className="text-lg">👩</span>
             <div>
               <p className="text-xs text-muted-foreground">여</p>
               <p className="font-bold text-pink-600 dark:text-pink-300">{femaleCount}명</p>
@@ -222,7 +227,7 @@ export function SessionDetail({
                 <p className="text-sm font-medium text-primary">예약 확정</p>
                 <p className="text-xs text-muted-foreground">참가비 {formatFee(session.fee)} 납부 완료</p>
               </div>
-              <Button variant="destructive" onClick={() => onCancel(myReservation.id)}>예약 취소</Button>
+              <Button variant="destructive" onClick={() => setShowCancelConfirm(true)}>예약 취소</Button>
             </div>
           ) : myParticipant?.status === "pending" && myReservation ? (
             <div className="flex items-center gap-3">
@@ -230,7 +235,7 @@ export function SessionDetail({
                 <p className="text-sm font-medium text-amber-600">입금 확인 중</p>
                 <p className="text-xs text-muted-foreground">관리자가 확인 후 확정됩니다</p>
               </div>
-              <Button variant="outline" onClick={() => onCancel(myReservation.id)}>취소</Button>
+              <Button variant="outline" onClick={() => setShowCancelConfirm(true)}>취소</Button>
             </div>
           ) : myParticipant?.status === "waitlisted" && myReservation ? (
             <div className="flex items-center gap-3">
@@ -238,7 +243,7 @@ export function SessionDetail({
                 <p className="text-sm font-medium">대기 {myWaitlistPosition}번째</p>
                 <p className="text-xs text-muted-foreground">자리가 나면 관리자가 입금 요청을 드립니다</p>
               </div>
-              <Button variant="outline" onClick={() => onCancel(myReservation.id)}>대기 취소</Button>
+              <Button variant="outline" onClick={() => setShowCancelConfirm(true)}>대기 취소</Button>
             </div>
           ) : !levelAllowed ? (
             <div className="rounded-xl bg-muted px-4 py-3 text-center text-sm text-muted-foreground">
@@ -249,16 +254,26 @@ export function SessionDetail({
               {session.status === "completed" ? "종료된 모임입니다" : "모집이 마감되었습니다"}
             </div>
           ) : spotsLeft > 0 ? (
-            <Button className="w-full" size="lg" onClick={() => onReserve(session.id)}>
+            <Button className="w-full" size="lg" onClick={() => { onReserve(session.id); showToast("신청이 완료되었습니다") }}>
               신청하기 · {formatFee(session.fee)} 계좌이체
             </Button>
           ) : (
-            <Button className="w-full" size="lg" variant="outline" onClick={() => onWaitlist(session.id)}>
+            <Button className="w-full" size="lg" variant="outline" onClick={() => { onWaitlist(session.id); showToast("대기 신청이 완료되었습니다") }}>
               대기 신청하기 (현재 대기 {waitlistedParticipants.length}명)
             </Button>
           )}
         </div>
       </div>
+
+      {showCancelConfirm && myReservation && (
+        <ConfirmDialog
+          message="예약을 취소하시겠습니까?"
+          confirmLabel="예약 취소"
+          onConfirm={() => { onCancel(myReservation.id); setShowCancelConfirm(false); showToast("예약이 취소되었습니다") }}
+          onCancel={() => setShowCancelConfirm(false)}
+        />
+      )}
+      {toast && <Toast message={toast.message} type={toast.type} onClose={hideToast} />}
     </div>
   )
 }
@@ -310,7 +325,6 @@ function ParticipantChip({
       {position !== undefined && (
         <span className="text-xs text-muted-foreground">{position}</span>
       )}
-      <span className="text-sm">{isMale ? "👨" : "👩"}</span>
       <span className={cn("size-5 rounded-full text-center text-xs font-bold leading-5", LEVEL_COLORS[p.level])}>
         {p.level}
       </span>

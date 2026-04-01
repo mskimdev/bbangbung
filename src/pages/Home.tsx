@@ -1,4 +1,4 @@
-import { CalendarDays, MapPin, Clock, ChevronRight, Zap } from "lucide-react"
+import { CalendarDays, MapPin, Clock, ChevronRight, AlertCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
@@ -17,6 +17,13 @@ interface HomeProps {
   onNavigate: (page: Page, sessionId?: string) => void
 }
 
+const RESERVATION_BADGE = {
+  confirmed:  { label: "예약 확정",   variant: "success"  as const },
+  pending:    { label: "입금 확인 중", variant: "warning"  as const },
+  waitlisted: { label: "대기 중",     variant: "outline"  as const },
+  cancelled:  { label: "취소됨",      variant: "destructive" as const },
+}
+
 export function Home({ currentUser, sessions, reservations, onNavigate }: HomeProps) {
   const today = new Date()
   const upcomingSessions = sessions
@@ -24,9 +31,12 @@ export function Home({ currentUser, sessions, reservations, onNavigate }: HomePr
     .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
     .slice(0, 3)
 
-  const upcomingReservations = reservations.filter(
-    (r) => r.status === "confirmed" && new Date(r.date) >= today
-  )
+  const activeReservations = reservations
+    .filter((r) => (r.status === "confirmed" || r.status === "pending" || r.status === "waitlisted") && new Date(r.date) >= today)
+    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+
+  const pendingCount = activeReservations.filter((r) => r.status === "pending").length
+  const confirmedCount = activeReservations.filter((r) => r.status === "confirmed").length
 
   return (
     <div className="flex flex-col gap-6 pb-4">
@@ -52,38 +62,66 @@ export function Home({ currentUser, sessions, reservations, onNavigate }: HomePr
             </span>
           )}
         </div>
-        <div className="mt-3 flex gap-3">
-          <div className="flex items-center gap-1 text-sm opacity-80">
-            <Zap className="size-4" />
-            <span>예약 {upcomingReservations.length}건 대기 중</span>
-          </div>
+        <div className="mt-3 flex gap-3 text-sm opacity-80">
+          <span>예약 확정 {confirmedCount}건</span>
+          {pendingCount > 0 && <span className="text-yellow-200">· 입금 대기 {pendingCount}건</span>}
         </div>
       </div>
 
-      {/* Upcoming reservations */}
-      {upcomingReservations.length > 0 && (
+      {/* 입금 대기 알림 */}
+      {pendingCount > 0 && (
+        <div
+          className="flex cursor-pointer items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-900/20"
+          onClick={() => onNavigate("my-reservations")}
+        >
+          <AlertCircle className="mt-0.5 size-4 shrink-0 text-amber-500" />
+          <div className="flex-1">
+            <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
+              입금 대기 {pendingCount}건
+            </p>
+            <p className="mt-0.5 text-xs text-amber-600 dark:text-amber-400">
+              계좌이체 후 관리자 확인을 기다리고 있습니다
+            </p>
+          </div>
+          <ChevronRight className="mt-0.5 size-4 shrink-0 text-amber-400" />
+        </div>
+      )}
+
+      {/* 내 예정 모임 */}
+      {activeReservations.length > 0 && (
         <section>
-          <h2 className="mb-3 font-semibold">내 예정 모임</h2>
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="font-semibold">내 예정 모임</h2>
+            <button
+              onClick={() => onNavigate("my-reservations")}
+              className="flex items-center gap-0.5 text-sm text-primary"
+            >
+              전체보기 <ChevronRight className="size-4" />
+            </button>
+          </div>
           <div className="flex flex-col gap-2">
-            {upcomingReservations.map((res) => (
-              <button
-                key={res.id}
-                onClick={() => onNavigate("session-detail", res.sessionId)}
-                className="flex items-center justify-between rounded-xl border border-primary/30 bg-primary/5 p-4 text-left transition hover:bg-primary/10"
-              >
-                <div className="flex flex-col gap-1">
-                  <span className="font-medium">{res.sessionTitle}</span>
-                  <span className="text-sm text-muted-foreground">
-                    {formatDate(res.date)} · {res.startTime}~{res.endTime}
-                  </span>
-                  <span className="text-sm text-muted-foreground">{res.location}</span>
-                </div>
-                <div className="flex flex-col items-end gap-1">
-                  <Badge variant="success">예약 확정</Badge>
-                  <span className="text-sm font-medium text-primary">{formatFee(res.fee)}</span>
-                </div>
-              </button>
-            ))}
+            {activeReservations.map((res) => {
+              const badge = RESERVATION_BADGE[res.status]
+              return (
+                <button
+                  key={res.id}
+                  onClick={() => onNavigate("session-detail", res.sessionId)}
+                  className="flex items-center justify-between rounded-xl border border-border bg-card p-4 text-left transition hover:shadow-sm"
+                >
+                  <div className="flex flex-col gap-1">
+                    <span className="font-medium">{res.sessionTitle}</span>
+                    <span className="text-sm text-muted-foreground">
+                      {formatDate(res.date)} · {res.startTime}~{res.endTime}
+                    </span>
+                    <span className="text-sm text-muted-foreground">{res.location}</span>
+                  </div>
+                  <div className="flex flex-col items-end gap-1.5">
+                    <Badge variant={badge.variant}>{badge.label}</Badge>
+                    <span className="text-sm font-medium text-primary">{formatFee(res.fee)}</span>
+                  </div>
+                </button>
+              )
+            })}
           </div>
         </section>
       )}
@@ -108,9 +146,16 @@ export function Home({ currentUser, sessions, reservations, onNavigate }: HomePr
             />
           ))}
           {upcomingSessions.length === 0 && (
-            <p className="py-8 text-center text-sm text-muted-foreground">
-              예정된 정모가 없습니다
-            </p>
+            <div className="flex flex-col items-center gap-3 py-10 text-muted-foreground">
+              <CalendarDays className="size-10 opacity-40" />
+              <div className="text-center">
+                <p className="text-sm font-medium">예정된 정모가 없습니다</p>
+                <p className="mt-1 text-xs">곧 새로운 모임이 열릴 예정이에요</p>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => onNavigate("sessions")}>
+                전체 목록 보기
+              </Button>
+            </div>
           )}
         </div>
       </section>
@@ -125,9 +170,10 @@ function SessionCard({
   session: BbangSession
   onClick: () => void
 }) {
-  const pct = Math.round((session.currentParticipants / session.maxParticipants) * 100)
+  const confirmedCount = session.participants.filter((p) => p.status === "confirmed").length
+  const pct = Math.round((confirmedCount / session.maxParticipants) * 100)
   const status = STATUS_CONFIG[session.status]
-  const spotsLeft = session.maxParticipants - session.currentParticipants
+  const spotsLeft = session.maxParticipants - confirmedCount
 
   return (
     <button
@@ -171,7 +217,7 @@ function SessionCard({
       <div>
         <div className="mb-1 flex justify-between text-xs text-muted-foreground">
           <span>
-            {session.currentParticipants}/{session.maxParticipants}명
+            {confirmedCount}/{session.maxParticipants}명
           </span>
           <span className={spotsLeft <= 3 ? "text-destructive font-medium" : ""}>
             {spotsLeft > 0 ? `잔여 ${spotsLeft}자리` : "마감"}

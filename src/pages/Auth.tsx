@@ -1,6 +1,6 @@
 import { useState } from "react"
-import { Eye, EyeOff } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { PasswordInput } from "@/components/ui/password-input"
 import { cn, formatPhone } from "@/lib/utils"
 import { LEVEL_COLORS } from "@/lib/badminton"
 import type { BadmintonLevel, Gender, Member } from "@/types"
@@ -139,6 +139,7 @@ function SignupForm({
     e.preventDefault()
     setError("")
 
+    if (!name.trim())       { setError("이름을 입력해주세요."); return }
     if (!gender || !level) { setError("성별과 급수를 선택해주세요."); return }
     if (!birthdate)         { setError("생년월일을 입력해주세요."); return }
     if (password.length < 6) { setError("비밀번호는 6자 이상이어야 합니다."); return }
@@ -172,7 +173,6 @@ function SignupForm({
                 gender === g ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:border-foreground"
               )}
             >
-              <span>{g === "male" ? "👨" : "👩"}</span>
               {g === "male" ? "남성" : "여성"}
             </button>
           ))}
@@ -224,38 +224,6 @@ function SignupForm({
 }
 
 /* ── 공통 컴포넌트 ─────────────────────────────────────── */
-function PasswordInput({
-  value,
-  onChange,
-  show,
-  onToggle,
-  placeholder,
-  isError,
-}: {
-  value: string
-  onChange: (v: string) => void
-  show: boolean
-  onToggle: () => void
-  placeholder?: string
-  isError?: boolean
-}) {
-  return (
-    <div className={cn("flex items-center rounded-xl border bg-background transition-colors focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/20", isError ? "border-destructive" : "border-border")}>
-      <input
-        type={show ? "text" : "password"}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        className="flex-1 bg-transparent px-3 py-2.5 text-sm outline-none placeholder:text-muted-foreground"
-        required
-      />
-      <button type="button" onClick={onToggle} className="px-3 text-muted-foreground hover:text-foreground">
-        {show ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-      </button>
-    </div>
-  )
-}
-
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-1.5">

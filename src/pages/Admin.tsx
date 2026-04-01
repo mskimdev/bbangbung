@@ -1,11 +1,14 @@
 import { useState } from "react"
-import { Plus, Search, CalendarDays, MapPin, Users, Phone, ChevronRight, ChevronLeft, CheckCircle2, XCircle, Clock, ShieldOff } from "lucide-react"
+import { Plus, Search, CalendarDays, MapPin, Users, Phone, ChevronRight, ChevronLeft, CheckCircle2, XCircle, Clock, ShieldOff, Pencil, Trash2, LockKeyhole, Unlock, Flag } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { Toast } from "@/components/ui/toast"
 import { cn } from "@/lib/utils"
 import { LEVEL_COLORS, STATUS_CONFIG, formatDate, formatFee } from "@/lib/badminton"
+import { useToast } from "@/hooks/useToast"
 import { CreateSession } from "@/pages/CreateSession"
-import type { BadmintonLevel, BbangSession, Member, Page } from "@/types"
+import type { BadmintonLevel, BbangSession, Member, Page, SessionStatus } from "@/types"
 
 const LEVELS: BadmintonLevel[] = ["S", "A", "B", "C", "D"]
 
@@ -18,12 +21,15 @@ interface AdminProps {
   onCancelParticipant: (sessionId: string, memberId: string) => void
   onPromoteFromWaitlist: (sessionId: string, memberId: string) => void
   onCreateSession: (session: Omit<BbangSession, "id" | "currentParticipants" | "participants" | "status">) => void
+  onUpdateSessionStatus: (sessionId: string, status: SessionStatus) => void
+  onEditSession: (sessionId: string, data: Omit<BbangSession, "id" | "currentParticipants" | "participants" | "status">) => void
+  onDeleteSession: (sessionId: string) => void
 }
 
 type AdminTab = "sessions" | "members"
-type SessionsView = "list" | "create" | "detail"
+type SessionsView = "list" | "create" | "edit" | "detail"
 
-export function Admin({ sessions, members, currentUser, onNavigate, onConfirmPayment, onCancelParticipant, onPromoteFromWaitlist, onCreateSession }: AdminProps) {
+export function Admin({ sessions, members, currentUser, onNavigate, onConfirmPayment, onCancelParticipant, onPromoteFromWaitlist, onCreateSession, onUpdateSessionStatus, onEditSession, onDeleteSession }: AdminProps) {
   if (!currentUser.isAdmin) {
     return (
       <div className="flex flex-col items-center justify-center gap-4 py-24 text-center">
@@ -42,11 +48,13 @@ export function Admin({ sessions, members, currentUser, onNavigate, onConfirmPay
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
   const [memberSearch, setMemberSearch] = useState("")
   const [levelFilter, setLevelFilter] = useState<BadmintonLevel | "all">("all")
+  const [genderFilter, setGenderFilter] = useState<"all" | "male" | "female">("all")
 
   const filteredMembers = members.filter((m) => {
     const matchSearch = memberSearch === "" || m.name.includes(memberSearch) || m.phone.includes(memberSearch)
     const matchLevel = levelFilter === "all" || m.level === levelFilter
-    return matchSearch && matchLevel
+    const matchGender = genderFilter === "all" || m.gender === genderFilter
+    return matchSearch && matchLevel && matchGender
   })
 
   const levelStats = LEVELS.map((l) => ({ level: l, count: members.filter((m) => m.level === l).length }))
@@ -62,6 +70,21 @@ export function Admin({ sessions, members, currentUser, onNavigate, onConfirmPay
           setSessionsView("list")
         }}
         onBack={() => setSessionsView("list")}
+      />
+    )
+  }
+
+  // 정모 수정 서브뷰
+  if (sessionsView === "edit" && selectedSession) {
+    return (
+      <CreateSession
+        organizer={currentUser.name}
+        initialData={selectedSession}
+        onSubmit={(data) => {
+          onEditSession(selectedSession.id, data)
+          setSessionsView("detail")
+        }}
+        onBack={() => setSessionsView("detail")}
       />
     )
   }
@@ -87,7 +110,9 @@ export function Admin({ sessions, members, currentUser, onNavigate, onConfirmPay
           onConfirm={(memberId) => onConfirmPayment(selectedSession.id, memberId)}
           onCancel={(memberId) => onCancelParticipant(selectedSession.id, memberId)}
           onPromote={(memberId) => onPromoteFromWaitlist(selectedSession.id, memberId)}
-          onViewDetail={() => onNavigate("session-detail", selectedSession.id)}
+          onUpdateStatus={(status) => onUpdateSessionStatus(selectedSession.id, status)}
+          onEdit={() => setSessionsView("edit")}
+          onDelete={() => onDeleteSession(selectedSession.id)}
         />
       ) : (
         <>
@@ -111,7 +136,6 @@ export function Admin({ sessions, members, currentUser, onNavigate, onConfirmPay
               sessions={sessions}
               onSelectSession={(id) => { setSelectedSessionId(id); setSessionsView("detail") }}
               onCreateSession={() => setSessionsView("create")}
-              onViewDetail={(id) => onNavigate("session-detail", id)}
             />
           )}
           {tab === "members" && (
@@ -122,6 +146,8 @@ export function Admin({ sessions, members, currentUser, onNavigate, onConfirmPay
               onSearch={setMemberSearch}
               levelFilter={levelFilter}
               onLevelFilter={setLevelFilter}
+              genderFilter={genderFilter}
+              onGenderFilter={setGenderFilter}
               levelStats={levelStats}
             />
           )}
@@ -133,14 +159,20 @@ export function Admin({ sessions, members, currentUser, onNavigate, onConfirmPay
 
 /* ── 정모별 참가비 관리 뷰 ──────────────────────────────── */
 function SessionPaymentManager({
-  session, onConfirm, onCancel, onPromote, onViewDetail,
+  session, onConfirm, onCancel, onPromote, onUpdateStatus, onEdit, onDelete,
 }: {
   session: BbangSession
   onConfirm: (memberId: string) => void
   onCancel: (memberId: string) => void
   onPromote: (memberId: string) => void
-  onViewDetail: () => void
+  onUpdateStatus: (status: SessionStatus) => void
+  onEdit: () => void
+  onDelete: () => void
 }) {
+  const [cancelTarget, setCancelTarget] = useState<{ memberId: string; name: string } | null>(null)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const { toast, showToast, hideToast } = useToast()
+
   const pending   = session.participants.filter((p) => p.status === "pending")
   const confirmed = session.participants.filter((p) => p.status === "confirmed")
   const waitlisted = session.participants.filter((p) => p.status === "waitlisted")
@@ -169,10 +201,33 @@ function SessionPaymentManager({
               <span className="text-xs text-muted-foreground">{label}</span>
             </div>
           ))}
-          <button onClick={onViewDetail} className="flex flex-1 flex-col items-center text-xs text-primary hover:underline">
-            <ChevronRight className="size-5" />
-            <span>상세보기</span>
-          </button>
+        </div>
+
+        {/* 상태 변경 */}
+        <div className="mt-3 flex flex-wrap gap-2 border-t border-border pt-3">
+          {session.status === "open" && (
+            <Button size="sm" variant="outline" onClick={() => { onUpdateStatus("closed"); showToast("모집 마감으로 변경됨") }}>
+              <LockKeyhole className="size-3.5" />모집 마감
+            </Button>
+          )}
+          {session.status === "closed" && (
+            <Button size="sm" variant="outline" onClick={() => { onUpdateStatus("open"); showToast("모집 중으로 변경됨") }}>
+              <Unlock className="size-3.5" />모집 재개
+            </Button>
+          )}
+          {session.status !== "completed" && session.status !== "cancelled" && (
+            <Button size="sm" variant="outline" onClick={() => { onUpdateStatus("completed"); showToast("종료로 변경됨") }}>
+              <Flag className="size-3.5" />종료 처리
+            </Button>
+          )}
+          <div className="ml-auto flex gap-2">
+            <Button size="sm" variant="outline" onClick={onEdit}>
+              <Pencil className="size-3.5" />수정
+            </Button>
+            <Button size="sm" variant="destructive" onClick={() => setShowDeleteConfirm(true)}>
+              <Trash2 className="size-3.5" />삭제
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -187,7 +242,6 @@ function SessionPaymentManager({
           <div className="flex flex-col gap-2">
             {pending.map((p) => (
               <div key={p.memberId} className="flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-900/20">
-                <span className="text-xl">{p.gender === "male" ? "👨" : "👩"}</span>
                 <div className="flex flex-1 flex-col gap-0.5">
                   <div className="flex items-center gap-2">
                     <span className="font-medium">{p.memberName}</span>
@@ -196,8 +250,8 @@ function SessionPaymentManager({
                   <span className="text-xs text-muted-foreground">신청일: {p.reservedAt}</span>
                 </div>
                 <div className="flex gap-1.5">
-                  <Button size="sm" onClick={() => onConfirm(p.memberId)}><CheckCircle2 className="size-3.5" />확정</Button>
-                  <Button size="sm" variant="destructive" onClick={() => onCancel(p.memberId)}><XCircle className="size-3.5" />취소</Button>
+                  <Button size="sm" onClick={() => { onConfirm(p.memberId); showToast(`${p.memberName} 입금 확정`) }}><CheckCircle2 className="size-3.5" />확정</Button>
+                  <Button size="sm" variant="destructive" onClick={() => setCancelTarget({ memberId: p.memberId, name: p.memberName })}><XCircle className="size-3.5" />취소</Button>
                 </div>
               </div>
             ))}
@@ -215,7 +269,6 @@ function SessionPaymentManager({
             {waitlisted.map((p, i) => (
               <div key={p.memberId} className="flex items-center gap-3 rounded-xl border border-dashed border-border bg-muted/30 p-3">
                 <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-bold text-muted-foreground">{i + 1}</span>
-                <span className="text-xl">{p.gender === "male" ? "👨" : "👩"}</span>
                 <div className="flex flex-1 flex-col gap-0.5">
                   <div className="flex items-center gap-2">
                     <span className="font-medium">{p.memberName}</span>
@@ -224,8 +277,8 @@ function SessionPaymentManager({
                   <span className="text-xs text-muted-foreground">대기 신청일: {p.reservedAt}</span>
                 </div>
                 <div className="flex gap-1.5">
-                  <Button size="sm" variant="outline" onClick={() => onPromote(p.memberId)}>입금요청</Button>
-                  <Button size="sm" variant="destructive" onClick={() => onCancel(p.memberId)}><XCircle className="size-3.5" /></Button>
+                  <Button size="sm" variant="outline" onClick={() => { onPromote(p.memberId); showToast(`${p.memberName} 입금 요청 전환`) }}>입금요청</Button>
+                  <Button size="sm" variant="destructive" onClick={() => setCancelTarget({ memberId: p.memberId, name: p.memberName })}><XCircle className="size-3.5" /></Button>
                 </div>
               </div>
             ))}
@@ -241,7 +294,6 @@ function SessionPaymentManager({
         <div className="flex flex-col gap-2">
           {confirmed.map((p) => (
             <div key={p.memberId} className="flex items-center gap-3 rounded-xl border border-border bg-card p-3">
-              <span className="text-xl">{p.gender === "male" ? "👨" : "👩"}</span>
               <div className="flex flex-1 flex-col gap-0.5">
                 <div className="flex items-center gap-2">
                   <span className="font-medium">{p.memberName}</span>
@@ -257,20 +309,36 @@ function SessionPaymentManager({
           )}
         </div>
       </section>
+
+      {cancelTarget && (
+        <ConfirmDialog
+          message={`${cancelTarget.name} 님의 참가를 취소하시겠습니까?`}
+          confirmLabel="참가 취소"
+          onConfirm={() => { onCancel(cancelTarget.memberId); showToast(`${cancelTarget.name} 참가 취소됨`); setCancelTarget(null) }}
+          onCancel={() => setCancelTarget(null)}
+        />
+      )}
+      {showDeleteConfirm && (
+        <ConfirmDialog
+          message={`'${session.title}' 정모를 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.`}
+          confirmLabel="삭제"
+          onConfirm={() => { setShowDeleteConfirm(false); onDelete() }}
+          onCancel={() => setShowDeleteConfirm(false)}
+        />
+      )}
+      {toast && <Toast message={toast.message} type={toast.type} onClose={hideToast} />}
     </div>
   )
 }
 
 /* ── 정모 목록 ────────────────────────────────────────── */
 function SessionsAdmin({
-  sessions, onSelectSession, onCreateSession, onViewDetail,
+  sessions, onSelectSession, onCreateSession,
 }: {
   sessions: BbangSession[]
   onSelectSession: (id: string) => void
   onCreateSession: () => void
-  onViewDetail: (id: string) => void
 }) {
-  void onViewDetail
   const sorted = [...sessions].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
 
   return (
@@ -283,6 +351,15 @@ function SessionsAdmin({
         </Button>
       </div>
 
+      {sorted.length === 0 && (
+        <div className="flex flex-col items-center gap-3 py-16 text-muted-foreground">
+          <CalendarDays className="size-10 opacity-40" />
+          <div className="text-center">
+            <p className="text-sm font-medium">아직 정모가 없습니다</p>
+            <p className="mt-1 text-xs">정모 생성 버튼을 눌러 첫 번째 모임을 만들어보세요</p>
+          </div>
+        </div>
+      )}
       {sorted.map((session) => {
         const status = STATUS_CONFIG[session.status]
         const pendingCount  = session.participants.filter((p) => p.status === "pending").length
@@ -302,7 +379,7 @@ function SessionsAdmin({
               </div>
               <div className="flex flex-col gap-1 text-xs text-muted-foreground">
                 <span className="flex items-center gap-1"><CalendarDays className="size-3" />{formatDate(session.date)} · {session.startTime}~{session.endTime}</span>
-                <span className="flex items-center gap-1"><Users className="size-3" />확정 {session.currentParticipants}/{session.maxParticipants}명 · {formatFee(session.fee)}</span>
+                <span className="flex items-center gap-1"><Users className="size-3" />확정 {session.participants.filter((p) => p.status === "confirmed").length}/{session.maxParticipants}명 · {formatFee(session.fee)}</span>
               </div>
             </div>
             <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
@@ -315,7 +392,7 @@ function SessionsAdmin({
 
 /* ── 회원 관리 ───────────────────────────────────────── */
 function MembersAdmin({
-  members, allMembers, search, onSearch, levelFilter, onLevelFilter, levelStats,
+  members, allMembers, search, onSearch, levelFilter, onLevelFilter, genderFilter, onGenderFilter, levelStats,
 }: {
   members: Member[]
   allMembers: Member[]
@@ -323,6 +400,8 @@ function MembersAdmin({
   onSearch: (v: string) => void
   levelFilter: BadmintonLevel | "all"
   onLevelFilter: (v: BadmintonLevel | "all") => void
+  genderFilter: "all" | "male" | "female"
+  onGenderFilter: (v: "all" | "male" | "female") => void
   levelStats: { level: BadmintonLevel; count: number }[]
 }) {
   return (
@@ -346,6 +425,26 @@ function MembersAdmin({
             onChange={(e) => onSearch(e.target.value)}
             className="flex-1 bg-transparent py-2.5 text-sm outline-none placeholder:text-muted-foreground"
           />
+        </div>
+        <div className="flex gap-1.5">
+          {(["all", "male", "female"] as const).map((g) => (
+            <button
+              key={g}
+              onClick={() => onGenderFilter(g)}
+              className={cn(
+                "flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold transition-colors",
+                genderFilter === g
+                  ? g === "all"
+                    ? "bg-primary text-primary-foreground"
+                    : g === "male"
+                      ? "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
+                      : "bg-pink-100 text-pink-700 dark:bg-pink-900/40 dark:text-pink-300"
+                  : "bg-muted text-muted-foreground"
+              )}
+            >
+              {g === "all" ? "전체" : g === "male" ? "남성" : "여성"}
+            </button>
+          ))}
         </div>
         <div className="flex gap-1.5">
           {(["all", ...LEVELS] as (BadmintonLevel | "all")[]).map((l) => (

@@ -1,4 +1,6 @@
+import { CalendarDays } from "lucide-react"
 import { SessionCard } from "./Home"
+import { Button } from "@/components/ui/button"
 import type { BbangSession, Page, SessionStatus } from "@/types"
 import { useState } from "react"
 import { cn } from "@/lib/utils"
@@ -56,9 +58,25 @@ export function SessionList({ sessions, onNavigate }: SessionListProps) {
           />
         ))}
         {filtered.length === 0 && (
-          <p className="py-12 text-center text-sm text-muted-foreground">
-            해당하는 정모가 없습니다
-          </p>
+          <div className="flex flex-col items-center gap-3 py-16 text-muted-foreground">
+            <CalendarDays className="size-10 opacity-40" />
+            <div className="text-center">
+              <p className="text-sm font-medium">
+                {filter === "all" ? "아직 정모가 없습니다" :
+                 filter === "open" ? "모집 중인 정모가 없습니다" :
+                 filter === "closed" ? "마감된 정모가 없습니다" :
+                 "완료된 정모가 없습니다"}
+              </p>
+              {filter === "open" && (
+                <p className="mt-1 text-xs">다른 탭을 확인하거나 나중에 다시 와보세요</p>
+              )}
+            </div>
+            {filter !== "all" && (
+              <Button variant="outline" size="sm" onClick={() => setFilter("all")}>
+                전체 보기
+              </Button>
+            )}
+          </div>
         )}
       </div>
     </div>

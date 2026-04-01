@@ -1,6 +1,7 @@
-import { CalendarDays, MapPin, Clock, CheckCircle2, XCircle } from "lucide-react"
+import { CalendarDays, MapPin, Clock, CheckCircle2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { cn } from "@/lib/utils"
 import { formatDate, formatFee } from "@/lib/badminton"
 import type { Page, Reservation, ReservationStatus } from "@/types"
@@ -23,6 +24,7 @@ const STATUS_BADGE: Record<ReservationStatus, { label: string; variant: "success
 
 export function MyReservations({ reservations, onNavigate, onCancel }: MyReservationsProps) {
   const [tab, setTab] = useState<Tab>("upcoming")
+  const [confirmId, setConfirmId] = useState<string | null>(null)
 
   const today = new Date()
   const upcoming = reservations.filter(
@@ -99,11 +101,11 @@ export function MyReservations({ reservations, onNavigate, onCancel }: MyReserva
                   >
                     상세보기
                   </Button>
-                  {res.status === "confirmed" && !isPast && (
+                  {(res.status === "confirmed" || res.status === "pending" || res.status === "waitlisted") && !isPast && (
                     <Button
                       variant="destructive"
                       size="sm"
-                      onClick={() => onCancel(res.id)}
+                      onClick={() => setConfirmId(res.id)}
                     >
                       취소
                     </Button>
@@ -133,6 +135,14 @@ export function MyReservations({ reservations, onNavigate, onCancel }: MyReserva
           </div>
         )}
       </div>
+      {confirmId && (
+        <ConfirmDialog
+          message="예약을 취소하시겠습니까?"
+          confirmLabel="예약 취소"
+          onConfirm={() => { onCancel(confirmId); setConfirmId(null) }}
+          onCancel={() => setConfirmId(null)}
+        />
+      )}
     </div>
   )
 }

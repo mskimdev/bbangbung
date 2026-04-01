@@ -9,22 +9,25 @@ const LEVELS: BadmintonLevel[] = ["S", "A", "B", "C", "D"]
 
 interface CreateSessionProps {
   organizer: string
+  initialData?: BbangSession
   onSubmit: (session: Omit<BbangSession, "id" | "currentParticipants" | "participants" | "status">) => void
   onBack: () => void
 }
 
-export function CreateSession({ organizer, onSubmit, onBack }: CreateSessionProps) {
-  const [title, setTitle]               = useState("")
-  const [date, setDate]                 = useState("")
-  const [startTime, setStartTime]       = useState("")
-  const [endTime, setEndTime]           = useState("")
-  const [location, setLocation]         = useState("")
-  const [address, setAddress]           = useState("")
-  const [courtCount, setCourtCount]     = useState("2")
-  const [maxParticipants, setMax]       = useState("16")
-  const [fee, setFee]                   = useState("5000")
-  const [description, setDescription]  = useState("")
-  const [levelRestriction, setLevelRestriction] = useState<BadmintonLevel[]>([])
+export function CreateSession({ organizer, initialData, onSubmit, onBack }: CreateSessionProps) {
+  const isEdit = !!initialData
+
+  const [title, setTitle]               = useState(initialData?.title ?? "")
+  const [date, setDate]                 = useState(initialData?.date ?? "")
+  const [startTime, setStartTime]       = useState(initialData?.startTime ?? "")
+  const [endTime, setEndTime]           = useState(initialData?.endTime ?? "")
+  const [location, setLocation]         = useState(initialData?.location ?? "")
+  const [address, setAddress]           = useState(initialData?.address ?? "")
+  const [courtCount, setCourtCount]     = useState(String(initialData?.courtCount ?? "2"))
+  const [maxParticipants, setMax]       = useState(String(initialData?.maxParticipants ?? "16"))
+  const [fee, setFee]                   = useState(String(initialData?.fee ?? "5000"))
+  const [description, setDescription]  = useState(initialData?.description ?? "")
+  const [levelRestriction, setLevelRestriction] = useState<BadmintonLevel[]>(initialData?.levelRestriction ?? [])
   const [error, setError]               = useState("")
 
   function toggleLevel(level: BadmintonLevel) {
@@ -37,8 +40,16 @@ export function CreateSession({ organizer, onSubmit, onBack }: CreateSessionProp
     e.preventDefault()
     setError("")
 
-    if (endTime && startTime && endTime <= startTime) {
+    if (!startTime || !endTime) {
+      setError("시작 시간과 종료 시간을 입력해주세요.")
+      return
+    }
+    if (endTime <= startTime) {
       setError("종료 시간은 시작 시간보다 늦어야 합니다.")
+      return
+    }
+    if (!isEdit && date < today) {
+      setError("과거 날짜로는 정모를 생성할 수 없습니다.")
       return
     }
     if (parseInt(maxParticipants) < 2) {
@@ -47,6 +58,10 @@ export function CreateSession({ organizer, onSubmit, onBack }: CreateSessionProp
     }
     if (parseInt(courtCount) < 1) {
       setError("코트 수는 1개 이상이어야 합니다.")
+      return
+    }
+    if (!fee.trim() || parseInt(fee) < 0) {
+      setError("참가비를 올바르게 입력해주세요.")
       return
     }
 
@@ -79,7 +94,7 @@ export function CreateSession({ organizer, onSubmit, onBack }: CreateSessionProp
         <ChevronLeft className="size-4" />
         관리자
       </button>
-      <h2 className="text-xl font-bold">정모 생성</h2>
+      <h2 className="text-xl font-bold">{isEdit ? "정모 수정" : "정모 생성"}</h2>
 
       {/* 제목 */}
       <Field label="정모 제목" required>
@@ -231,7 +246,7 @@ export function CreateSession({ organizer, onSubmit, onBack }: CreateSessionProp
       )}
 
       <Button type="submit" size="lg" className="w-full">
-        정모 생성하기
+        {isEdit ? "수정 완료" : "정모 생성하기"}
       </Button>
     </form>
   )
