@@ -1,16 +1,8 @@
 import { useState, useEffect } from "react"
 import type { Member, Reservation } from "@/types"
-import api from "@/lib/api"
+import api, { getErrorMessage } from "@/lib/api"
 
 type ShowToast = (message: string, type?: "success" | "error") => void
-
-function getErrorMessage(error: unknown): string {
-  if (error && typeof error === "object" && "response" in error) {
-    const res = (error as any).response
-    if (res?.data?.message) return res.data.message
-  }
-  return "오류가 발생했습니다."
-}
 
 function mapReservation(r: any): Reservation {
   return {
@@ -23,6 +15,7 @@ function mapReservation(r: any): Reservation {
     location: r.location,
     fee: r.fee,
     status: r.status,
+    usedFreeTicket: r.usedFreeTicket ?? false,
     createdAt: r.createdAt,
   }
 }
@@ -31,6 +24,7 @@ export function useReservations(
   currentUser: Member | null,
   refreshSession: (sessionId: string) => Promise<void>,
   showToast: ShowToast,
+  refreshCurrentUser?: () => Promise<void>,
 ) {
   const [reservations, setReservations] = useState<Reservation[]>([])
 
@@ -48,12 +42,14 @@ export function useReservations(
     fetchReservations()
   }, [currentUser])
 
-  async function handleReserve(sessionId: string) {
+  async function handleReserve(sessionId: string, useFreeTicket = false) {
     if (!currentUser) return
     try {
-      await api.post("/reservations", { memberId: currentUser.id, sessionId })
-      await Promise.all([fetchReservations(), refreshSession(sessionId)])
-      showToast("예약 신청이 완료되었습니다.")
+      await api.post("/reservations", { memberId: currentUser.id, sessionId, useFreeTicket })
+      const promises: Promise<void>[] = [fetchReservations(), refreshSession(sessionId)]
+      if (useFreeTicket && refreshCurrentUser) promises.push(refreshCurrentUser())
+      await Promise.all(promises)
+      showToast(useFreeTicket ? "무료권으로 예약이 확정되었습니다." : "예약 신청이 완료되었습니다.")
     } catch (e) {
       showToast(getErrorMessage(e), "error")
     }

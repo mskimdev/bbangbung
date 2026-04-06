@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { ChevronLeft } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { cn } from "@/lib/utils"
 import { LEVEL_COLORS } from "@/lib/badminton"
 import type { BadmintonLevel, BbangSession } from "@/types"
@@ -21,14 +22,16 @@ export function CreateSession({ organizer, initialData, onSubmit, onBack }: Crea
   const [date, setDate]                 = useState(initialData?.date ?? "")
   const [startTime, setStartTime]       = useState(initialData?.startTime ?? "")
   const [endTime, setEndTime]           = useState(initialData?.endTime ?? "")
-  const [location, setLocation]         = useState(initialData?.location ?? "")
-  const [address, setAddress]           = useState(initialData?.address ?? "")
-  const [courtCount, setCourtCount]     = useState(String(initialData?.courtCount ?? "2"))
-  const [maxParticipants, setMax]       = useState(String(initialData?.maxParticipants ?? "16"))
-  const [fee, setFee]                   = useState(String(initialData?.fee ?? "5000"))
+  const [location, setLocation]         = useState(initialData?.location ?? "민턴하우스")
+  const [address, setAddress]           = useState(initialData?.address ?? "부산 강서구 제도로 36")
+  const [courtCount, setCourtCount]     = useState(String(initialData?.courtCount ?? "4"))
+  const [maxParticipants, setMax]       = useState(String(initialData?.maxParticipants ?? "24"))
+  const [fee, setFee]                   = useState(String(initialData?.fee ?? "7000"))
   const [description, setDescription]  = useState(initialData?.description ?? "")
   const [levelRestriction, setLevelRestriction] = useState<BadmintonLevel[]>(initialData?.levelRestriction ?? [])
   const [error, setError]               = useState("")
+  const [showBackConfirm, setShowBackConfirm] = useState(false)
+  const [isDirty, setIsDirty]           = useState(false)
 
   function toggleLevel(level: BadmintonLevel) {
     setLevelRestriction((prev) =>
@@ -83,12 +86,20 @@ export function CreateSession({ organizer, initialData, onSubmit, onBack }: Crea
 
   const today = new Date().toISOString().slice(0, 10)
 
+  function handleBack() {
+    if (isDirty) {
+      setShowBackConfirm(true)
+    } else {
+      onBack()
+    }
+  }
+
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-5 pb-4">
+    <form onSubmit={handleSubmit} onChange={() => setIsDirty(true)} className="flex flex-col gap-5 pb-4">
       {/* 헤더 */}
       <button
         type="button"
-        onClick={onBack}
+        onClick={handleBack}
         className="-mx-1 flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
       >
         <ChevronLeft className="size-4" />
@@ -248,6 +259,15 @@ export function CreateSession({ organizer, initialData, onSubmit, onBack }: Crea
       <Button type="submit" size="lg" className="w-full">
         {isEdit ? "수정 완료" : "정모 생성하기"}
       </Button>
+
+      {showBackConfirm && (
+        <ConfirmDialog
+          message="작성 중인 내용이 사라집니다. 나가시겠습니까?"
+          confirmLabel="나가기"
+          onConfirm={onBack}
+          onCancel={() => setShowBackConfirm(false)}
+        />
+      )}
     </form>
   )
 }

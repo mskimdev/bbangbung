@@ -15,7 +15,7 @@ export function Toast({ message, type, onClose }: ToastProps) {
   }, [onClose])
 
   return (
-    <div className="fixed bottom-24 left-1/2 z-50 -translate-x-1/2">
+    <div className="fixed bottom-32 left-1/2 z-50 -translate-x-1/2">
       <div
         className={cn(
           "flex items-center gap-2 rounded-full border px-4 py-2.5 text-sm font-medium shadow-lg",

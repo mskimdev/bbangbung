@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { cn } from "@/lib/utils"
-import { LEVEL_COLORS, STATUS_CONFIG, formatDate, formatFee } from "@/lib/badminton"
+import { LEVEL_COLORS, STATUS_CONFIG, formatDate, formatFee, formatTime } from "@/lib/badminton"
 import { CreateSession } from "@/pages/CreateSession"
 import api from "@/lib/api"
 import type { BadmintonLevel, BbangSession, Member, Page, SessionStatus } from "@/types"
@@ -16,6 +16,7 @@ interface AdminProps {
   currentUser: Member
   onNavigate: (page: Page, sessionId?: string) => void
   onConfirmPayment: (sessionId: string, memberId: string) => Promise<void>
+  onConfirmAll: (sessionId: string) => Promise<void>
   onCancelParticipant: (sessionId: string, memberId: string) => Promise<void>
   onPromoteFromWaitlist: (sessionId: string, memberId: string) => Promise<void>
   onCreateSession: (session: Omit<BbangSession, "id" | "currentParticipants" | "participants" | "status">, organizerId: string) => void
@@ -28,7 +29,66 @@ interface AdminProps {
 type AdminTab = "sessions" | "members"
 type SessionsView = "list" | "create" | "edit" | "detail"
 
-export function Admin({ sessions, currentUser, onNavigate, onConfirmPayment, onCancelParticipant, onPromoteFromWaitlist, onCreateSession, onUpdateSessionStatus, onEditSession, onDeleteSession, showToast }: AdminProps) {
+export function Admin({ sessions, currentUser, onNavigate, onConfirmPayment, onConfirmAll, onCancelParticipant, onPromoteFromWaitlist, onCreateSession, onUpdateSessionStatus, onEditSession, onDeleteSession, showToast }: AdminProps) {
+  const [tab, setTab] = useState<AdminTab>("sessions")
+  const [sessionsView, setSessionsView] = useState<SessionsView>("list")
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
+  const [memberSearch, setMemberSearch] = useState("")
+  const [levelFilter, setLevelFilter] = useState<BadmintonLevel | "all">("all")
+  const [genderFilter, setGenderFilter] = useState<"all" | "male" | "female">("all")
+  const [members, setMembers] = useState<Member[]>([])
+  const [membersLoading, setMembersLoading] = useState(false)
+
+  function fetchMembers(keyword: string, level: BadmintonLevel | "all", gender: "all" | "male" | "female") {
+    if (!currentUser.isAdmin) return
+    setMembersLoading(true)
+    const params = new URLSearchParams()
+    if (keyword.trim()) params.set("keyword", keyword.trim())
+    if (level !== "all") params.set("level", level)
+    if (gender !== "all") params.set("gender", gender)
+    api.get(`/members?${params.toString()}`)
+      .then(({ data }) => {
+        setMembers(data.map((m: any): Member => ({
+          id: m.id,
+          name: m.name,
+          birthdate: m.birthdate,
+          gender: m.gender,
+          level: m.level,
+          phone: m.phone,
+          joinedAt: m.joinedAt,
+          isAdmin: m.admin,
+          freeTickets: m.freeTickets ?? 0,
+          totalAttendance: m.totalAttendance ?? 0,
+          monthlyAttendance: m.monthlyAttendance ?? 0,
+        })))
+      })
+      .catch(() => showToast("회원 목록을 불러오지 못했습니다.", "error"))
+      .finally(() => setMembersLoading(false))
+  }
+
+  useEffect(() => {
+    fetchMembers(memberSearch, levelFilter, genderFilter)
+  }, [])
+
+  // 검색/필터 변경 시 디바운스 없이 즉시 요청 (입력 완료 후 엔터/버튼 방식이므로 괜찮음)
+  function handleSearch(value: string) {
+    setMemberSearch(value)
+  }
+
+  function handleLevelFilter(value: BadmintonLevel | "all") {
+    setLevelFilter(value)
+    fetchMembers(memberSearch, value, genderFilter)
+  }
+
+  function handleGenderFilter(value: "all" | "male" | "female") {
+    setGenderFilter(value)
+    fetchMembers(memberSearch, levelFilter, value)
+  }
+
+  function handleSearchSubmit() {
+    fetchMembers(memberSearch, levelFilter, genderFilter)
+  }
+
   if (!currentUser.isAdmin) {
     return (
       <div className="flex flex-col items-center justify-center gap-4 py-24 text-center">
@@ -41,42 +101,6 @@ export function Admin({ sessions, currentUser, onNavigate, onConfirmPayment, onC
       </div>
     )
   }
-
-  const [tab, setTab] = useState<AdminTab>("sessions")
-  const [sessionsView, setSessionsView] = useState<SessionsView>("list")
-  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
-  const [memberSearch, setMemberSearch] = useState("")
-  const [levelFilter, setLevelFilter] = useState<BadmintonLevel | "all">("all")
-  const [genderFilter, setGenderFilter] = useState<"all" | "male" | "female">("all")
-  const [members, setMembers] = useState<Member[]>([])
-  const [membersLoading, setMembersLoading] = useState(false)
-
-  useEffect(() => {
-    setMembersLoading(true)
-    api.get("/members")
-      .then(({ data }) => {
-        setMembers(data.map((m: any): Member => ({
-          id: m.id,
-          name: m.name,
-          birthdate: m.birthdate,
-          gender: m.gender,
-          level: m.level,
-          phone: m.phone,
-          password: m.password,
-          joinedAt: m.joinedAt,
-          isAdmin: m.admin,
-        })))
-      })
-      .catch(() => showToast("회원 목록을 불러오지 못했습니다.", "error"))
-      .finally(() => setMembersLoading(false))
-  }, [])
-
-  const filteredMembers = members.filter((m) => {
-    const matchSearch = memberSearch === "" || m.name.includes(memberSearch) || m.phone.includes(memberSearch)
-    const matchLevel = levelFilter === "all" || m.level === levelFilter
-    const matchGender = genderFilter === "all" || m.gender === genderFilter
-    return matchSearch && matchLevel && matchGender
-  })
 
   const levelStats = LEVELS.map((l) => ({ level: l, count: members.filter((m) => m.level === l).length }))
   const selectedSession = sessions.find((s) => s.id === selectedSessionId)
@@ -129,6 +153,7 @@ export function Admin({ sessions, currentUser, onNavigate, onConfirmPayment, onC
         <SessionPaymentManager
           session={selectedSession}
           onConfirm={(memberId) => onConfirmPayment(selectedSession.id, memberId)}
+          onConfirmAll={() => onConfirmAll(selectedSession.id)}
           onCancel={(memberId) => onCancelParticipant(selectedSession.id, memberId)}
           onPromote={(memberId) => onPromoteFromWaitlist(selectedSession.id, memberId)}
           onUpdateStatus={(status) => onUpdateSessionStatus(selectedSession.id, status)}
@@ -161,14 +186,14 @@ export function Admin({ sessions, currentUser, onNavigate, onConfirmPayment, onC
           )}
           {tab === "members" && (
             <MembersAdmin
-              members={filteredMembers}
-              allMembers={members}
+              members={members}
               search={memberSearch}
-              onSearch={setMemberSearch}
+              onSearch={handleSearch}
+              onSearchSubmit={handleSearchSubmit}
               levelFilter={levelFilter}
-              onLevelFilter={setLevelFilter}
+              onLevelFilter={handleLevelFilter}
               genderFilter={genderFilter}
-              onGenderFilter={setGenderFilter}
+              onGenderFilter={handleGenderFilter}
               levelStats={levelStats}
               loading={membersLoading}
             />
@@ -181,10 +206,11 @@ export function Admin({ sessions, currentUser, onNavigate, onConfirmPayment, onC
 
 /* ── 정모별 참가비 관리 뷰 ──────────────────────────────── */
 function SessionPaymentManager({
-  session, onConfirm, onCancel, onPromote, onUpdateStatus, onEdit, onDelete,
+  session, onConfirm, onConfirmAll, onCancel, onPromote, onUpdateStatus, onEdit, onDelete,
 }: {
   session: BbangSession
   onConfirm: (memberId: string) => Promise<void>
+  onConfirmAll: () => Promise<void>
   onCancel: (memberId: string) => Promise<void>
   onPromote: (memberId: string) => Promise<void>
   onUpdateStatus: (status: SessionStatus) => Promise<void>
@@ -193,6 +219,8 @@ function SessionPaymentManager({
 }) {
   const [cancelTarget, setCancelTarget] = useState<{ memberId: string; name: string } | null>(null)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [showCompleteConfirm, setShowCompleteConfirm] = useState(false)
+  const [showConfirmAllConfirm, setShowConfirmAllConfirm] = useState(false)
   const [loadingId, setLoadingId] = useState<string | null>(null)
 
   const pending   = session.participants.filter((p) => p.status === "pending")
@@ -208,7 +236,7 @@ function SessionPaymentManager({
           <Badge variant={STATUS_CONFIG[session.status].variant}>{STATUS_CONFIG[session.status].label}</Badge>
         </div>
         <div className="flex flex-col gap-1 text-sm text-muted-foreground">
-          <span className="flex items-center gap-1.5"><CalendarDays className="size-3.5" /> {formatDate(session.date)} · {session.startTime}~{session.endTime}</span>
+          <span className="flex items-center gap-1.5"><CalendarDays className="size-3.5" /> {formatDate(session.date)} · {formatTime(session.startTime)}~{formatTime(session.endTime)}</span>
           <span className="flex items-center gap-1.5"><MapPin className="size-3.5" /> {session.location}</span>
         </div>
         <div className="mt-3 flex gap-3 border-t border-border pt-3 text-sm">
@@ -226,39 +254,37 @@ function SessionPaymentManager({
         </div>
 
         {/* 상태 변경 */}
-        <div className="mt-3 flex flex-wrap gap-2 border-t border-border pt-3">
-          {session.status === "open" && (
-            <Button size="sm" variant="outline" disabled={loadingId === "status"} onClick={async () => {
-              setLoadingId("status")
-              await onUpdateStatus("closed")
-              setLoadingId(null)
-            }}>
-              <LockKeyhole className="size-3.5" />{loadingId === "status" ? "처리 중..." : "모집 마감"}
-            </Button>
-          )}
-          {session.status === "closed" && (
-            <Button size="sm" variant="outline" disabled={loadingId === "status"} onClick={async () => {
-              setLoadingId("status")
-              await onUpdateStatus("open")
-              setLoadingId(null)
-            }}>
-              <Unlock className="size-3.5" />{loadingId === "status" ? "처리 중..." : "모집 재개"}
-            </Button>
-          )}
-          {session.status !== "completed" && session.status !== "cancelled" && (
-            <Button size="sm" variant="outline" disabled={loadingId === "status"} onClick={async () => {
-              setLoadingId("status")
-              await onUpdateStatus("completed")
-              setLoadingId(null)
-            }}>
-              <Flag className="size-3.5" />{loadingId === "status" ? "처리 중..." : "종료 처리"}
-            </Button>
-          )}
-          <div className="ml-auto flex gap-2">
-            <Button size="sm" variant="outline" onClick={onEdit}>
+        <div className="mt-3 border-t border-border pt-3">
+          <div className="flex flex-wrap gap-2">
+            {session.status === "open" && (
+              <Button size="sm" variant="outline" disabled={loadingId === "status"} onClick={async () => {
+                setLoadingId("status")
+                await onUpdateStatus("closed")
+                setLoadingId(null)
+              }}>
+                <LockKeyhole className="size-3.5" />{loadingId === "status" ? "처리 중..." : "모집 마감"}
+              </Button>
+            )}
+            {session.status === "closed" && (
+              <Button size="sm" variant="outline" disabled={loadingId === "status"} onClick={async () => {
+                setLoadingId("status")
+                await onUpdateStatus("open")
+                setLoadingId(null)
+              }}>
+                <Unlock className="size-3.5" />{loadingId === "status" ? "처리 중..." : "모집 재개"}
+              </Button>
+            )}
+            {session.status !== "completed" && session.status !== "cancelled" && (
+              <Button size="sm" variant="outline" disabled={loadingId === "status"} onClick={() => setShowCompleteConfirm(true)}>
+                <Flag className="size-3.5" />{loadingId === "status" ? "처리 중..." : "종료 처리"}
+              </Button>
+            )}
+          </div>
+          <div className="mt-2 flex gap-2 border-t border-border pt-2">
+            <Button size="sm" variant="outline" className="flex-1" onClick={onEdit}>
               <Pencil className="size-3.5" />수정
             </Button>
-            <Button size="sm" variant="destructive" onClick={() => setShowDeleteConfirm(true)}>
+            <Button size="sm" variant="destructive" className="flex-1" onClick={() => setShowDeleteConfirm(true)}>
               <Trash2 className="size-3.5" />삭제
             </Button>
           </div>
@@ -266,10 +292,18 @@ function SessionPaymentManager({
       </div>
 
       <section>
-        <h3 className="mb-3 flex items-center gap-2 font-semibold">
-          <Clock className="size-4 text-amber-500" />
-          입금 대기 ({pending.length}명)
-        </h3>
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="flex items-center gap-2 font-semibold">
+            <Clock className="size-4 text-amber-500" />
+            입금 대기 ({pending.length}명)
+          </h3>
+          {pending.length > 1 && (
+            <Button size="sm" variant="outline" disabled={loadingId === "confirmAll"} onClick={() => setShowConfirmAllConfirm(true)}>
+              <CheckCircle2 className="size-3.5" />
+              {loadingId === "confirmAll" ? "처리 중..." : "전체 확정"}
+            </Button>
+          )}
+        </div>
         {pending.length === 0 ? (
           <p className="rounded-xl bg-muted py-6 text-center text-sm text-muted-foreground">대기 중인 참가자가 없습니다</p>
         ) : (
@@ -340,6 +374,9 @@ function SessionPaymentManager({
                 <div className="flex items-center gap-2">
                   <span className="font-medium">{p.memberName}</span>
                   <span className={cn("rounded-full px-2 py-0.5 text-xs font-bold", LEVEL_COLORS[p.level])}>{p.level}급</span>
+                  {p.usedFreeTicket && (
+                    <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">무료권</span>
+                  )}
                 </div>
                 <span className="text-xs text-muted-foreground">확정일: {p.reservedAt}</span>
               </div>
@@ -374,6 +411,32 @@ function SessionPaymentManager({
           onCancel={() => setShowDeleteConfirm(false)}
         />
       )}
+      {showCompleteConfirm && (
+        <ConfirmDialog
+          message={`'${session.title}' 정모를 종료 처리하시겠습니까? 확정 참가자의 참여 횟수가 집계되고 무료권이 적립됩니다.`}
+          confirmLabel="종료 처리"
+          onConfirm={async () => {
+            setShowCompleteConfirm(false)
+            setLoadingId("status")
+            await onUpdateStatus("completed")
+            setLoadingId(null)
+          }}
+          onCancel={() => setShowCompleteConfirm(false)}
+        />
+      )}
+      {showConfirmAllConfirm && (
+        <ConfirmDialog
+          message={`입금 대기 중인 ${pending.length}명을 전체 확정하시겠습니까?`}
+          confirmLabel="전체 확정"
+          onConfirm={async () => {
+            setShowConfirmAllConfirm(false)
+            setLoadingId("confirmAll")
+            await onConfirmAll()
+            setLoadingId(null)
+          }}
+          onCancel={() => setShowConfirmAllConfirm(false)}
+        />
+      )}
     </div>
   )
 }
@@ -386,7 +449,15 @@ function SessionsAdmin({
   onSelectSession: (id: string) => void
   onCreateSession: () => void
 }) {
-  const sorted = [...sessions].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+  const sorted = [...sessions].sort((a, b) => {
+    const aActive = a.status === "open" || a.status === "closed"
+    const bActive = b.status === "open" || b.status === "closed"
+    if (aActive && !bActive) return -1
+    if (!aActive && bActive) return 1
+    // 활성 정모는 날짜 임박순, 나머지는 최신순
+    if (aActive) return new Date(a.date).getTime() - new Date(b.date).getTime()
+    return new Date(b.date).getTime() - new Date(a.date).getTime()
+  })
 
   return (
     <div className="flex flex-col gap-3">
@@ -425,7 +496,7 @@ function SessionsAdmin({
                 {waitlistCount > 0 && <Badge variant="outline">{waitlistCount} 대기자</Badge>}
               </div>
               <div className="flex flex-col gap-1 text-xs text-muted-foreground">
-                <span className="flex items-center gap-1"><CalendarDays className="size-3" />{formatDate(session.date)} · {session.startTime}~{session.endTime}</span>
+                <span className="flex items-center gap-1"><CalendarDays className="size-3" />{formatDate(session.date)} · {formatTime(session.startTime)}~{formatTime(session.endTime)}</span>
                 <span className="flex items-center gap-1"><Users className="size-3" />확정 {session.participants.filter((p) => p.status === "confirmed").length}/{session.maxParticipants}명 · {formatFee(session.fee)}</span>
               </div>
             </div>
@@ -439,12 +510,12 @@ function SessionsAdmin({
 
 /* ── 회원 관리 ───────────────────────────────────────── */
 function MembersAdmin({
-  members, allMembers, search, onSearch, levelFilter, onLevelFilter, genderFilter, onGenderFilter, levelStats, loading,
+  members, search, onSearch, onSearchSubmit, levelFilter, onLevelFilter, genderFilter, onGenderFilter, levelStats, loading,
 }: {
   members: Member[]
-  allMembers: Member[]
   search: string
   onSearch: (v: string) => void
+  onSearchSubmit: () => void
   levelFilter: BadmintonLevel | "all"
   onLevelFilter: (v: BadmintonLevel | "all") => void
   genderFilter: "all" | "male" | "female"
@@ -478,9 +549,10 @@ function MembersAdmin({
           <Search className="size-4 shrink-0 text-muted-foreground" />
           <input
             type="text"
-            placeholder="이름 또는 전화번호 검색"
+            placeholder="이름 또는 전화번호 검색 후 엔터"
             value={search}
             onChange={(e) => onSearch(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && onSearchSubmit()}
             className="flex-1 bg-transparent py-2.5 text-sm outline-none placeholder:text-muted-foreground"
           />
         </div>
@@ -522,7 +594,7 @@ function MembersAdmin({
         </div>
       </div>
 
-      <span className="text-sm text-muted-foreground">{members.length}명 / 전체 {allMembers.length}명</span>
+      <span className="text-sm text-muted-foreground">{members.length}명</span>
 
       <div className="flex flex-col gap-2">
         {members.map((member) => (
@@ -541,6 +613,14 @@ function MembersAdmin({
               <span className="flex items-center gap-1 text-xs text-muted-foreground">
                 <Phone className="size-3" /> {member.phone}
               </span>
+              <span className="text-xs text-muted-foreground">가입 {member.joinedAt.slice(0, 10).replace(/-/g, ".")}</span>
+              <div className="flex gap-3 mt-1 text-xs text-muted-foreground">
+                <span>총 <span className="font-semibold text-foreground">{member.totalAttendance}</span>회</span>
+                <span>이번 달 <span className="font-semibold text-foreground">{member.monthlyAttendance}</span>회</span>
+                {member.freeTickets > 0 && (
+                  <span className="font-semibold text-primary">무료권 {member.freeTickets}장</span>
+                )}
+              </div>
             </div>
           </div>
         ))}

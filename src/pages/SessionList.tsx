@@ -20,7 +20,7 @@ const tabs: { value: FilterTab; label: string }[] = [
 ]
 
 export function SessionList({ sessions, onNavigate }: SessionListProps) {
-  const [filter, setFilter] = useState<FilterTab>("all")
+  const [filter, setFilter] = useState<FilterTab>("open")
 
   const filtered = sessions
     .filter((s) => filter === "all" || s.status === filter)
@@ -37,7 +37,7 @@ export function SessionList({ sessions, onNavigate }: SessionListProps) {
             key={tab.value}
             onClick={() => setFilter(tab.value)}
             className={cn(
-              "flex-1 rounded-lg py-1.5 text-sm font-medium transition-colors",
+              "flex-1 rounded-lg py-2.5 text-sm font-medium transition-colors",
               filter === tab.value
                 ? "bg-background text-foreground shadow-sm"
                 : "text-muted-foreground hover:text-foreground"

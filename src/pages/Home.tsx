@@ -1,12 +1,14 @@
-import { CalendarDays, MapPin, Clock, ChevronRight, AlertCircle } from "lucide-react"
+import { CalendarDays, MapPin, Clock, ChevronRight, AlertCircle, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
+import { useState } from "react"
 import {
   LEVEL_COLORS,
   STATUS_CONFIG,
   formatDate,
   formatFee,
+  formatTime,
 } from "@/lib/badminton"
 import type { BbangSession, Member, Page, Reservation } from "@/types"
 
@@ -25,6 +27,7 @@ const RESERVATION_BADGE = {
 }
 
 export function Home({ currentUser, sessions, reservations, onNavigate }: HomeProps) {
+  const [dismissedPendingBanner, setDismissedPendingBanner] = useState(false)
   const todayStr = new Date().toLocaleDateString("sv") // "YYYY-MM-DD" 로컬 기준
   const upcomingSessions = sessions
     .filter((s) => s.status === "open" && s.date >= todayStr)
@@ -69,13 +72,10 @@ export function Home({ currentUser, sessions, reservations, onNavigate }: HomePr
       </div>
 
       {/* 입금 대기 알림 */}
-      {pendingCount > 0 && (
-        <div
-          className="flex cursor-pointer items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-900/20"
-          onClick={() => onNavigate("my-reservations")}
-        >
+      {pendingCount > 0 && !dismissedPendingBanner && (
+        <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-900/20">
           <AlertCircle className="mt-0.5 size-4 shrink-0 text-amber-500" />
-          <div className="flex-1">
+          <div className="flex-1 cursor-pointer" onClick={() => onNavigate("my-reservations")}>
             <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
               입금 대기 {pendingCount}건
             </p>
@@ -83,7 +83,12 @@ export function Home({ currentUser, sessions, reservations, onNavigate }: HomePr
               계좌이체 후 관리자 확인을 기다리고 있습니다
             </p>
           </div>
-          <ChevronRight className="mt-0.5 size-4 shrink-0 text-amber-400" />
+          <button
+            onClick={() => setDismissedPendingBanner(true)}
+            className="mt-0.5 shrink-0 text-amber-400 hover:text-amber-600"
+          >
+            <X className="size-4" />
+          </button>
         </div>
       )}
 
@@ -111,7 +116,7 @@ export function Home({ currentUser, sessions, reservations, onNavigate }: HomePr
                   <div className="flex flex-col gap-1">
                     <span className="font-medium">{res.sessionTitle}</span>
                     <span className="text-sm text-muted-foreground">
-                      {formatDate(res.date)} · {res.startTime}~{res.endTime}
+                      {formatDate(res.date)} · {formatTime(res.startTime)}~{formatTime(res.endTime)}
                     </span>
                     <span className="text-sm text-muted-foreground">{res.location}</span>
                   </div>
@@ -202,7 +207,7 @@ function SessionCard({
       <div className="flex flex-col gap-1.5 text-sm text-muted-foreground">
         <span className="flex items-center gap-1.5">
           <CalendarDays className="size-3.5 shrink-0" />
-          {formatDate(session.date)} · {session.startTime}~{session.endTime}
+          {formatDate(session.date)} · {formatTime(session.startTime)}~{formatTime(session.endTime)}
         </span>
         <span className="flex items-center gap-1.5">
           <MapPin className="size-3.5 shrink-0" />

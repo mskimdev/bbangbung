@@ -3,14 +3,14 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { cn } from "@/lib/utils"
-import { formatDate, formatFee } from "@/lib/badminton"
+import { formatDate, formatFee, formatTime } from "@/lib/badminton"
 import type { Page, Reservation, ReservationStatus } from "@/types"
 import { useState } from "react"
 
 interface MyReservationsProps {
   reservations: Reservation[]
   onNavigate: (page: Page, sessionId?: string) => void
-  onCancel: (reservationId: string) => void
+  onCancel: (reservationId: string) => Promise<void>
 }
 
 type Tab = "upcoming" | "past"
@@ -25,13 +25,14 @@ const STATUS_BADGE: Record<ReservationStatus, { label: string; variant: "success
 export function MyReservations({ reservations, onNavigate, onCancel }: MyReservationsProps) {
   const [tab, setTab] = useState<Tab>("upcoming")
   const [confirmId, setConfirmId] = useState<string | null>(null)
+  const [cancelling, setCancelling] = useState(false)
 
   const todayStr = new Date().toLocaleDateString("sv") // "YYYY-MM-DD" 로컬 기준
   const upcoming = reservations.filter(
     (r) => r.status !== "cancelled" && r.date >= todayStr
   )
   const past = reservations.filter(
-    (r) => r.status === "cancelled" || r.date < todayStr
+    (r) => r.status !== "cancelled" && r.date < todayStr
   )
 
   const list = tab === "upcoming" ? upcoming : past
@@ -47,7 +48,7 @@ export function MyReservations({ reservations, onNavigate, onCancel }: MyReserva
             key={t}
             onClick={() => setTab(t)}
             className={cn(
-              "flex-1 rounded-lg py-1.5 text-sm font-medium transition-colors",
+              "flex-1 rounded-lg py-2.5 text-sm font-medium transition-colors",
               tab === t
                 ? "bg-background text-foreground shadow-sm"
                 : "text-muted-foreground hover:text-foreground"
@@ -83,7 +84,7 @@ export function MyReservations({ reservations, onNavigate, onCancel }: MyReserva
                 </span>
                 <span className="flex items-center gap-1.5">
                   <Clock className="size-3.5 shrink-0" />
-                  {res.startTime} ~ {res.endTime}
+                  {formatTime(res.startTime)} ~ {formatTime(res.endTime)}
                 </span>
                 <span className="flex items-center gap-1.5">
                   <MapPin className="size-3.5 shrink-0" />
@@ -92,11 +93,12 @@ export function MyReservations({ reservations, onNavigate, onCancel }: MyReserva
               </div>
 
               <div className="flex items-center justify-between border-t border-border pt-3">
-                <span className="text-sm font-semibold text-primary">{formatFee(res.fee)}</span>
+                <span className="text-sm font-semibold text-primary">
+                  {res.usedFreeTicket ? "무료권 사용" : formatFee(res.fee)}
+                </span>
                 <div className="flex gap-2">
                   <Button
                     variant="outline"
-                    size="sm"
                     onClick={() => onNavigate("session-detail", res.sessionId)}
                   >
                     상세보기
@@ -104,7 +106,6 @@ export function MyReservations({ reservations, onNavigate, onCancel }: MyReserva
                   {(res.status === "confirmed" || res.status === "pending" || res.status === "waitlisted") && !isPast && (
                     <Button
                       variant="destructive"
-                      size="sm"
                       onClick={() => setConfirmId(res.id)}
                     >
                       취소
@@ -138,8 +139,13 @@ export function MyReservations({ reservations, onNavigate, onCancel }: MyReserva
       {confirmId && (
         <ConfirmDialog
           message="예약을 취소하시겠습니까?"
-          confirmLabel="예약 취소"
-          onConfirm={() => { onCancel(confirmId); setConfirmId(null) }}
+          confirmLabel={cancelling ? "취소 중..." : "예약 취소"}
+          onConfirm={async () => {
+            setCancelling(true)
+            await onCancel(confirmId)
+            setCancelling(false)
+            setConfirmId(null)
+          }}
           onCancel={() => setConfirmId(null)}
         />
       )}

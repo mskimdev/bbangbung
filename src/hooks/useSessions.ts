@@ -1,16 +1,8 @@
 import { useState, useEffect } from "react"
 import type { BbangSession, SessionParticipant, SessionStatus } from "@/types"
-import api from "@/lib/api"
+import api, { getErrorMessage } from "@/lib/api"
 
 type ShowToast = (message: string, type?: "success" | "error") => void
-
-function getErrorMessage(error: unknown): string {
-  if (error && typeof error === "object" && "response" in error) {
-    const res = (error as any).response
-    if (res?.data?.message) return res.data.message
-  }
-  return "오류가 발생했습니다."
-}
 
 function mapSession(s: any): BbangSession {
   return {
@@ -36,6 +28,7 @@ function mapSession(s: any): BbangSession {
       level: p.level,
       reservedAt: p.reservedAt,
       status: p.status,
+      usedFreeTicket: p.usedFreeTicket ?? false,
     })),
   }
 }
@@ -127,11 +120,13 @@ export function useSessions(showToast: ShowToast) {
   }
 
   async function handleUpdateSessionStatus(sessionId: string, status: SessionStatus) {
+    const prev = sessions.find((s) => s.id === sessionId)
+    setSessions((cur) => cur.map((s) => (s.id === sessionId ? { ...s, status } : s)))
     try {
       await api.patch(`/sessions/${sessionId}/status`, { status })
-      setSessions((prev) => prev.map((s) => (s.id === sessionId ? { ...s, status } : s)))
       showToast("세션 상태가 변경되었습니다.")
     } catch (e) {
+      if (prev) setSessions((cur) => cur.map((s) => (s.id === sessionId ? prev : s)))
       showToast(getErrorMessage(e), "error")
     }
   }
@@ -141,6 +136,16 @@ export function useSessions(showToast: ShowToast) {
       await api.patch("/reservations/confirm", { memberId, sessionId })
       await refreshSession(sessionId)
       showToast("입금이 확인되었습니다.")
+    } catch (e) {
+      showToast(getErrorMessage(e), "error")
+    }
+  }
+
+  async function handleConfirmAll(sessionId: string) {
+    try {
+      await api.patch(`/reservations/confirm-all?sessionId=${sessionId}`)
+      await refreshSession(sessionId)
+      showToast("전체 입금이 확정되었습니다.")
     } catch (e) {
       showToast(getErrorMessage(e), "error")
     }
@@ -176,6 +181,7 @@ export function useSessions(showToast: ShowToast) {
     handleDeleteSession,
     handleUpdateSessionStatus,
     handleConfirmPayment,
+    handleConfirmAll,
     handlePromoteFromWaitlist,
     handleCancelParticipant,
   }

@@ -1,10 +1,10 @@
 import { useState } from "react"
-import { ChevronLeft, MapPin, CalendarDays, Users, Layers, BanknoteIcon } from "lucide-react"
+import { ChevronLeft, MapPin, CalendarDays, Users, Layers, BanknoteIcon, Copy, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { cn } from "@/lib/utils"
-import { LEVEL_COLORS, STATUS_CONFIG, getLevelCounts, formatDate, formatFee } from "@/lib/badminton"
+import { LEVEL_COLORS, STATUS_CONFIG, getLevelCounts, formatDate, formatFee, formatTime, BANK_ACCOUNT } from "@/lib/badminton"
 import type { BadmintonLevel, BbangSession, Member, Page, Reservation } from "@/types"
 
 const LEVELS: BadmintonLevel[] = ["S", "A", "B", "C", "D"]
@@ -13,22 +13,33 @@ interface SessionDetailProps {
   session: BbangSession
   currentUser: Member
   reservations: Reservation[]
+  previousPage: Page
   onNavigate: (page: Page, sessionId?: string) => void
-  onReserve: (sessionId: string) => Promise<void>
+  onReserve: (sessionId: string, useFreeTicket?: boolean) => Promise<void>
   onWaitlist: (sessionId: string) => Promise<void>
   onCancel: (reservationId: string) => Promise<void>
+  onToast: (message: string, type?: "success" | "error") => void
+}
+
+const BACK_LABEL: Partial<Record<Page, string>> = {
+  home: "홈",
+  sessions: "정모 목록",
+  "my-reservations": "내 예약",
 }
 
 export function SessionDetail({
   session,
   currentUser,
   reservations,
+  previousPage,
   onNavigate,
   onReserve,
   onWaitlist,
   onCancel,
+  onToast,
 }: SessionDetailProps) {
   const [showCancelConfirm, setShowCancelConfirm] = useState(false)
+  const [showReserveSheet, setShowReserveSheet] = useState(false)
   const [actionLoading, setActionLoading] = useState(false)
 
   const status = STATUS_CONFIG[session.status]
@@ -66,11 +77,11 @@ export function SessionDetail({
     <div className="flex flex-col gap-5 pb-28">
       {/* Back */}
       <button
-        onClick={() => onNavigate("sessions")}
+        onClick={() => onNavigate(previousPage)}
         className="-mx-1 flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
       >
         <ChevronLeft className="size-4" />
-        정모 목록
+        {BACK_LABEL[previousPage] ?? "정모 목록"}
       </button>
 
       {/* Header */}
@@ -85,7 +96,7 @@ export function SessionDetail({
       {/* Info card */}
       <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4">
         <InfoRow icon={<CalendarDays className="size-4" />}>
-          {formatDate(session.date)} · {session.startTime}~{session.endTime}
+          {formatDate(session.date)} · {formatTime(session.startTime)}~{formatTime(session.endTime)}
         </InfoRow>
         <InfoRow icon={<MapPin className="size-4" />}>
           <span className="font-medium">{session.location}</span>
@@ -97,6 +108,7 @@ export function SessionDetail({
         <InfoRow icon={<BanknoteIcon className="size-4" />}>
           참가비 <span className="font-semibold text-primary">{formatFee(session.fee)}</span>
           <span className="ml-1 text-xs text-muted-foreground">(계좌이체 후 관리자 확인)</span>
+          <span className="mt-1 block text-xs text-muted-foreground">{BANK_ACCOUNT}</span>
         </InfoRow>
         {session.levelRestriction && (
           <InfoRow icon={<Users className="size-4" />}>
@@ -252,12 +264,8 @@ export function SessionDetail({
               {session.status === "completed" ? "종료된 모임입니다" : "모집이 마감되었습니다"}
             </div>
           ) : spotsLeft > 0 ? (
-            <Button className="w-full" size="lg" disabled={actionLoading} onClick={async () => {
-              setActionLoading(true)
-              await onReserve(session.id)
-              setActionLoading(false)
-            }}>
-              {actionLoading ? "신청 중..." : `신청하기 · ${formatFee(session.fee)} 계좌이체`}
+            <Button className="w-full" size="lg" disabled={actionLoading} onClick={() => setShowReserveSheet(true)}>
+              {`신청하기 · ${formatFee(session.fee)} 계좌이체`}
             </Button>
           ) : (
             <Button className="w-full" size="lg" variant="outline" disabled={actionLoading} onClick={async () => {
@@ -265,7 +273,7 @@ export function SessionDetail({
               await onWaitlist(session.id)
               setActionLoading(false)
             }}>
-              {actionLoading ? "신청 중..." : `대기 신청하기 (현재 대기 ${waitlistedParticipants.length}명)`}
+              {actionLoading ? "대기 신청 중..." : `대기 신청하기 (현재 대기 ${waitlistedParticipants.length}명)`}
             </Button>
           )}
         </div>
@@ -282,6 +290,22 @@ export function SessionDetail({
             setActionLoading(false)
           }}
           onCancel={() => setShowCancelConfirm(false)}
+        />
+      )}
+
+      {showReserveSheet && (
+        <ReserveSheet
+          fee={session.fee}
+          freeTickets={currentUser.freeTickets}
+          onConfirm={async (useFreeTicket) => {
+            setActionLoading(true)
+            await onReserve(session.id, useFreeTicket)
+            setActionLoading(false)
+            setShowReserveSheet(false)
+          }}
+          onCancel={() => setShowReserveSheet(false)}
+          loading={actionLoading}
+          onToast={onToast}
         />
       )}
     </div>
@@ -352,5 +376,144 @@ function InfoRow({ icon, children }: { icon: React.ReactNode; children: React.Re
       <span className="mt-0.5 shrink-0 text-muted-foreground">{icon}</span>
       <span>{children}</span>
     </div>
+  )
+}
+
+function ReserveSheet({
+  fee,
+  freeTickets,
+  onConfirm,
+  onCancel,
+  loading,
+  onToast,
+}: {
+  fee: number
+  freeTickets: number
+  onConfirm: (useFreeTicket: boolean) => Promise<void>
+  onCancel: () => void
+  loading: boolean
+  onToast: (message: string, type?: "success" | "error") => void
+}) {
+  const [useFreeTicket, setUseFreeTicket] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const account = BANK_ACCOUNT
+
+  async function handleCopy() {
+    const accountNumber = account.split(" ")[1]
+    const text = `${accountNumber} ${formatFee(fee)}`
+    try {
+      await navigator.clipboard.writeText(text)
+    } catch {
+      const el = document.createElement("textarea")
+      el.value = text
+      el.style.position = "fixed"
+      el.style.opacity = "0"
+      document.body.appendChild(el)
+      el.select()
+      document.execCommand("copy")
+      document.body.removeChild(el)
+    }
+    navigator.vibrate?.(50)
+    setCopied(true)
+    onToast("계좌번호가 복사되었습니다.", "success")
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  return (
+    <>
+      {/* 배경 딤 */}
+      <div className="fixed inset-0 z-40 bg-black/50" onClick={onCancel} />
+      {/* 시트 */}
+      <div className="fixed bottom-0 left-0 right-0 z-50 rounded-t-2xl bg-background px-5 pb-24 pt-5 shadow-xl">
+        <div className="mx-auto max-w-lg">
+          {/* 핸들 */}
+          <div className="mx-auto mb-5 h-1 w-10 rounded-full bg-muted" />
+
+          {/* 무료권 선택 */}
+          {freeTickets > 0 && (
+            <div className="mb-5 flex flex-col gap-2">
+              <p className="text-sm font-semibold">참가비 결제 방법</p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setUseFreeTicket(false)}
+                  className={cn(
+                    "flex flex-1 flex-col items-center gap-1 rounded-xl border py-3 text-sm transition-colors",
+                    !useFreeTicket ? "border-primary bg-primary/10 text-primary font-medium" : "border-border text-muted-foreground"
+                  )}
+                >
+                  <span>계좌이체</span>
+                  <span className="text-xs">{formatFee(fee)}</span>
+                </button>
+                <button
+                  onClick={() => setUseFreeTicket(true)}
+                  className={cn(
+                    "flex flex-1 flex-col items-center gap-1 rounded-xl border py-3 text-sm transition-colors",
+                    useFreeTicket ? "border-primary bg-primary/10 text-primary font-medium" : "border-border text-muted-foreground"
+                  )}
+                >
+                  <span>무료권 사용</span>
+                  <span className="text-xs">보유 {freeTickets}장</span>
+                </button>
+              </div>
+              {useFreeTicket && (
+                <p className="rounded-lg bg-primary/5 px-3 py-2 text-xs text-primary">
+                  무료권 1장을 사용하면 즉시 예약이 확정됩니다.
+                </p>
+              )}
+            </div>
+          )}
+
+          {!useFreeTicket && (
+            <>
+              <h2 className="mb-1 text-lg font-bold">신청 전 확인해주세요</h2>
+              <p className="mb-5 text-sm text-muted-foreground">입금 완료 후 관리자가 확인하면 예약이 확정됩니다.</p>
+
+              {/* 안내 단계 */}
+              <div className="mb-5 flex flex-col gap-3">
+                {[
+                  { step: "1", text: "아래 계좌로 참가비를 이체해주세요." },
+                  { step: "2", text: "신청하기를 누르면 입금 대기 상태가 됩니다." },
+                  { step: "3", text: "관리자가 입금을 확인하면 예약이 확정됩니다." },
+                ].map(({ step, text }) => (
+                  <div key={step} className="flex items-start gap-3">
+                    <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">
+                      {step}
+                    </span>
+                    <p className="pt-0.5 text-sm">{text}</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* 계좌 정보 */}
+              <div className="mb-6 rounded-xl bg-muted px-4 py-3">
+                <p className="mb-2 text-xs text-muted-foreground">입금 계좌</p>
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="font-semibold">{account.split(" ").slice(0, -1).join(" ")}</p>
+                    <p className="text-sm text-muted-foreground">{account.split(" ").slice(-1)[0]}</p>
+                    <p className="mt-1 text-sm font-bold text-primary">{formatFee(fee)}</p>
+                  </div>
+                  <button
+                    onClick={handleCopy}
+                    className="flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-2 text-xs font-medium transition-colors hover:bg-muted"
+                  >
+                    {copied ? <Check className="size-3.5 text-green-500" /> : <Copy className="size-3.5" />}
+                    {copied ? "복사됨" : "복사"}
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* 버튼 */}
+          <div className="flex gap-2">
+            <Button variant="outline" className="flex-1" disabled={loading} onClick={onCancel}>취소</Button>
+            <Button className="flex-1" disabled={loading} onClick={() => onConfirm(useFreeTicket)}>
+              {loading ? "신청 중..." : useFreeTicket ? "무료권으로 신청" : "신청하기"}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </>
   )
 }

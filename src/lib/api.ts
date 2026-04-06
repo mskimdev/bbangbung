@@ -1,7 +1,7 @@
 import axios from "axios"
 
 const api = axios.create({
-  baseURL: "http://localhost:8080/api",
+  baseURL: import.meta.env.VITE_API_URL ?? "http://localhost:8080/api",
   headers: { "Content-Type": "application/json" },
 })
 
@@ -13,5 +13,13 @@ api.interceptors.request.use((config) => {
   }
   return config
 })
+
+export function getErrorMessage(error: unknown): string {
+  if (error && typeof error === "object" && "response" in error) {
+    const res = (error as any).response
+    if (res?.data?.message) return res.data.message
+  }
+  return "오류가 발생했습니다."
+}
 
 export default api

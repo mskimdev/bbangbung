@@ -384,19 +384,76 @@ closed         → open (모집 재개)
 - [x] 토스트 중복 제거 — SessionDetail/Admin 내부 showToast 호출 제거, 훅에서 단일 처리
 - [x] 날짜 비교 버그 수정 — `new Date(str)` UTC 파싱 → `toLocaleDateString("sv")` 문자열 비교
 - [x] Admin 회원 목록 에러 처리 — 조회 실패 시 에러 토스트, 로딩 중 스켈레톤 표시
+- [x] 시간 표시 포맷 — `"01:00:00"` → `"01:00"` (`formatTime` 유틸 추가, `badminton.ts`)
+- [x] 참가비 계좌 안내 바텀시트 — 신청하기 클릭 시 3단계 안내 + 계좌+금액 복사 (클립보드 API + execCommand fallback + 햅틱 + 토스트)
+- [x] 모바일 접속 지원 — `vite.config.ts` `host: true`, `.env.local` VITE_API_URL 설정, CorsConfig에 로컬 IP 허용
+- [x] JwtFilter 삭제 회원 토큰 처리 — `UsernameNotFoundException` catch 후 인증 없이 계속 진행
+- [x] GlobalExceptionHandler SSE 호환 — SSE 요청(`Accept: text/event-stream`) 시 JSON 대신 SSE 이벤트 형식으로 에러 응답
+- [x] Auth 에러 메시지 개선 — catch 하드코딩 제거 → `getErrorMessage(e)` 서버 응답 기반으로 표시
+- [x] UX/UI 개선
+  - 대기 신청 로딩 텍스트 "대기 신청 중..." 추가
+  - CreateSession 뒤로가기 작성 내용 손실 방지 (`isDirty` + ConfirmDialog)
+  - Home 입금 대기 배너 X 버튼 닫기 추가
+  - MyReservations 버튼 `size="sm"` 제거 (터치 영역 확대)
+  - SessionList / MyReservations 탭 높이 `py-1.5` → `py-2.5`
+  - Admin 버튼 레이아웃 — 상태변경 / 수정·삭제 2행으로 분리
+  - ConfirmDialog `pb-8` → `pb-24` (모바일 네비바 가림 수정)
+  - Toast `bottom-24` → `bottom-32` (모바일 네비바 위로 올림)
+  - 계좌 정보 레이아웃 개선 — 은행명/계좌번호/예금주 분리 표시
 
 ---
 
 ## 미해결 보완 항목
 
-1. **`MyProfile` 토스트 중복** — `handleInfoSave`의 `showToast` + `useAuth.handleUpdateProfile`의 `showToast` 동시 호출. `MyProfile` 내부 호출 제거 필요.
-2. **`MyProfile` 저장 버튼 로딩 상태 없음** — `handleInfoSave`, `handlePasswordSave` API 호출 중 버튼 비활성화 미처리.
-3. **SSE 재연결 시 데이터 동기화 없음** — 타임아웃(3분) 후 브라우저 자동 재연결 시 최신 세션 상태가 반영되지 않음. `connected` 이벤트 수신 시 `refreshSession` 호출로 동기화 필요.
-4. **`Admin` Rules of Hooks 위반** — `!currentUser.isAdmin` early return 이후에 `useState`/`useEffect` 호출. hooks를 early return 위로 이동 필요.
-5. **`useReservations`에서 `refreshSession` 중복 호출** — 예약/취소 시 REST `refreshSession` + SSE `session-update`가 동시에 세션을 업데이트. SSE가 있으므로 `refreshSession` 호출 제거 가능.
+없음 — 모두 해결됨.
+
+### 해결된 항목 (이력)
+- `MyProfile` 토스트 중복 → `handleInfoSave` 내부 `showToast` 제거 (`useAuth`에서 단일 처리)
+- `MyProfile` 저장 버튼 로딩 상태 없음 → `infoLoading`, `pwLoading` 상태 추가, 호출 중 버튼 비활성화
+- SSE 재연결 시 데이터 동기화 없음 → `useSessionSse`에 `onReconnect` 콜백 추가, `es.onopen` 재연결 감지 시 `refreshSession` 호출
+- `Admin` Rules of Hooks 위반 → `useState`/`useEffect`를 early return 위로 이동, `useEffect` 내 `isAdmin` 조건 체크
+- `useReservations` `refreshSession` → SSE 지연 시 `session.participants`가 즉시 반영 안 되어 CTA가 갱신 안 되는 문제로 `refreshSession` 복원. `fetchReservations`와 `Promise.all`로 병렬 호출
+- 프로필 수정 시 비밀번호 이중 encode 버그 → `Member` 타입에서 `password` 제거, `UpdateProfileRequest`에서 `password` 제거, `MemberService.updateProfile` 파라미터 제거, `handleInfoSave`에서 password 전달 제거
+- `getErrorMessage` 중복 → `lib/api.ts`로 통합, 각 훅에서 import
+- JWT Secret / DB 비밀번호 평문 노출 → `application.yaml`에서 `${JWT_SECRET}`, `${DB_USERNAME}`, `${DB_PASSWORD}` 환경변수로 분리 (기본값 fallback 유지)
+- 프로필 수정 실패 시 UI 불일치 → `handleInfoSave`에 try/catch 추가, `useAuth.handleUpdateProfile`에서 에러 re-throw
+- 세션 상태 변경 Optimistic update 롤백 없음 → API 실패 시 이전 상태로 rollback
+- `ReservationRepository` N+1 쿼리 → `findByMemberIdAndStatus`, `findByMemberIdAndSessionId`에 `@EntityGraph({"session"})` 추가
+- 급수 제한 백엔드 검증 없음 → `ReservationService.validateLevelRestriction()` 추가, `ErrorCode.LEVEL_NOT_ALLOWED` 추가
+- `SessionResponse` cancelled 참가자 포함 → participants 직렬화 시 cancelled 필터링, `currentParticipants`를 confirmed+pending으로 수정
+- `ReservationService` 동시성 → `reserve/waitlist` 트랜잭션에 `Isolation.SERIALIZABLE` 적용
+- SSE 인증 없음 → `SessionController.stream()`에 `?token=` 쿼리 파라미터 검증 추가, 프론트 `useSessionSse`에서 토큰 전달
+- `MyReservations` 취소 다이얼로그 → `onCancel` prop을 `Promise<void>`로 변경, `await` + `cancelling` 상태 추가
+- `findByMember` cancelled 포함 → `findByMemberIdAndStatusNot(cancelled)` 으로 교체
+- SSE 재구독 → `useSessionSse`에 `onerror` 3초 재연결 로직 추가, 백엔드 타임아웃 3분 → 30분
+- Admin 회원 검색 클라이언트 필터링 → `GET /api/members?keyword=&level=&gender=` 서버사이드 처리, 엔터키로 검색 실행
+
+---
+
+## 다음 할 일 (배포)
+
+### 배포 목표
+Oracle Cloud Free Tier VM 1대에 Spring Boot + MySQL + Nginx 올리기 (영구 무료)
+
+### 배포 순서
+- [ ] Oracle Cloud 가입 및 VM 인스턴스 생성 (Ubuntu 22.04, ARM 또는 x86)
+- [ ] VM에 Java 21 설치
+- [ ] VM에 MySQL 8 설치 및 DB/계정 생성
+- [ ] Spring Boot `application.yaml` 환경변수 설정 (JWT_SECRET, DB_USERNAME, DB_PASSWORD)
+- [ ] 프론트엔드 빌드 (`npm run build`) → `dist/` 파일을 `bbangbung-be/src/main/resources/static/`에 복사
+- [ ] Spring Boot JAR 빌드 (`./mvnw package`)
+- [ ] JAR 파일 서버에 업로드 (scp 또는 GitHub Actions)
+- [ ] Nginx 설치 및 리버스 프록시 설정 (80/443 → 8080)
+- [ ] Let's Encrypt로 HTTPS 인증서 발급 (certbot)
+- [ ] 무료 도메인 연결 (freedns.afraid.org 또는 소유 도메인)
+- [ ] CORS 설정에 실제 도메인 추가 (`CorsConfig.java`)
+- [ ] `.env.local` VITE_API_URL을 실제 도메인으로 변경 후 재빌드
+- [ ] systemd 서비스 등록 (서버 재시작 시 자동 실행)
 
 ---
 
 ## 알려진 제약사항
 
 - React Router 없음 — URL 변경 없음, 뒤로가기 미지원
+- 현재 HTTP 환경 — 모바일 클립보드 API 불안정 (HTTPS 배포 후 해결됨)
+- iOS Vibration API 미지원 — 햅틱 피드백 없음 (네이티브 앱 아니면 불가)

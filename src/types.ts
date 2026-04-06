@@ -11,9 +11,11 @@ export interface Member {
   gender: Gender
   level: BadmintonLevel
   phone: string
-  password: string
   joinedAt: string
   isAdmin: boolean
+  freeTickets: number
+  totalAttendance: number
+  monthlyAttendance: number
 }
 
 export interface SessionParticipant {
@@ -23,6 +25,7 @@ export interface SessionParticipant {
   level: BadmintonLevel
   reservedAt: string
   status: ReservationStatus
+  usedFreeTicket: boolean
 }
 
 export interface BbangSession {
@@ -54,5 +57,6 @@ export interface Reservation {
   location: string
   fee: number
   status: ReservationStatus
+  usedFreeTicket: boolean
   createdAt: string
 }

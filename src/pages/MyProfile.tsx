@@ -1,4 +1,4 @@
-import { useReducer } from "react"
+import { useReducer, useState } from "react"
 import { Sun, Moon, Monitor } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { PasswordInput } from "@/components/ui/password-input"
@@ -13,7 +13,7 @@ const LEVELS: BadmintonLevel[] = ["S", "A", "B", "C", "D"]
 
 interface MyProfileProps {
   currentUser: Member
-  onUpdate: (updated: Pick<Member, "level" | "phone" | "password">) => void
+  onUpdate: (updated: Pick<Member, "level" | "phone">) => void
   onChangePassword: (currentPassword: string, newPassword: string) => Promise<void>
   onLogout: () => void
 }
@@ -62,7 +62,9 @@ function profileReducer(state: ProfileState, action: ProfileAction): ProfileStat
 
 export function MyProfile({ currentUser, onUpdate, onChangePassword, onLogout }: MyProfileProps) {
   const { theme, setTheme } = useTheme()
-  const { toast, showToast, hideToast } = useToast()
+  const { toast, hideToast } = useToast()
+  const [infoLoading, setInfoLoading] = useState(false)
+  const [pwLoading, setPwLoading] = useState(false)
   const [state, dispatch] = useReducer(profileReducer, {
     level: currentUser.level,
     phone: currentUser.phone,
@@ -79,22 +81,31 @@ export function MyProfile({ currentUser, onUpdate, onChangePassword, onLogout }:
   const { level, phone, infoError, currentPw, newPw, confirmPw, showCur, showNew, showCon, pwError } = state
   const isInfoDirty = level !== currentUser.level || phone !== currentUser.phone
 
-  function handleInfoSave() {
+  async function handleInfoSave() {
     dispatch({ type: "SET_INFO_ERROR", error: "" })
     if (!phone.trim()) { dispatch({ type: "SET_INFO_ERROR", error: "전화번호를 입력해주세요." }); return }
-    onUpdate({ level, phone: phone.trim(), password: currentUser.password })
-    showToast("저장되었습니다")
+    setInfoLoading(true)
+    try {
+      await onUpdate({ level, phone: phone.trim() })
+    } catch {
+      dispatch({ type: "SET_INFO_ERROR", error: "저장에 실패했습니다." })
+    } finally {
+      setInfoLoading(false)
+    }
   }
 
   async function handlePasswordSave() {
     dispatch({ type: "SET_PW_ERROR", error: "" })
     if (newPw.length < 6)  { dispatch({ type: "SET_PW_ERROR", error: "새 비밀번호는 6자 이상이어야 합니다." }); return }
     if (newPw !== confirmPw) { dispatch({ type: "SET_PW_ERROR", error: "새 비밀번호가 일치하지 않습니다." }); return }
+    setPwLoading(true)
     try {
       await onChangePassword(currentPw, newPw)
       dispatch({ type: "RESET_PW_FIELDS" })
     } catch {
       dispatch({ type: "SET_PW_ERROR", error: "현재 비밀번호가 올바르지 않습니다." })
+    } finally {
+      setPwLoading(false)
     }
   }
 
@@ -109,6 +120,50 @@ export function MyProfile({ currentUser, onUpdate, onChangePassword, onLogout }:
         <Row label="성별"     value={currentUser.gender === "male" ? "남성" : "여성"} />
         {currentUser.isAdmin && <Row label="권한" value="관리자" highlight />}
       </div>
+
+      {/* 참여 통계 */}
+      <section className="flex flex-col gap-3">
+        <h2 className="text-sm font-semibold text-muted-foreground">참여 현황</h2>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="flex flex-col items-center justify-center rounded-xl border border-border bg-card p-4 gap-1">
+            <span className="text-2xl font-bold text-primary">{currentUser.totalAttendance}</span>
+            <span className="text-xs text-muted-foreground">총 참여 횟수</span>
+          </div>
+          <div className="flex flex-col items-center justify-center rounded-xl border border-border bg-card p-4 gap-1">
+            <span className="text-2xl font-bold text-primary">{currentUser.monthlyAttendance}</span>
+            <span className="text-xs text-muted-foreground">이번 달 참여</span>
+          </div>
+        </div>
+
+        {/* 무료권 적립 진행 바 */}
+        <div className="flex flex-col gap-2 rounded-xl border border-border bg-card p-4">
+          <div className="flex items-center justify-between text-sm">
+            <span className="font-medium">무료 참여권 적립</span>
+            <span className="text-muted-foreground">
+              {currentUser.totalAttendance % 10}/10
+            </span>
+          </div>
+          <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
+            <div
+              className="h-full rounded-full bg-primary transition-all"
+              style={{ width: `${(currentUser.totalAttendance % 10) * 10}%` }}
+            />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            10회 참여 시 무료 참여권 1장이 적립됩니다.
+          </p>
+        </div>
+
+        {/* 무료권 보유 현황 */}
+        {currentUser.freeTickets > 0 && (
+          <div className="rounded-xl border border-primary/40 bg-primary/5 p-4">
+            <div className="flex flex-col gap-0.5">
+              <span className="text-sm font-semibold text-primary">무료 참여권</span>
+              <span className="text-xs text-muted-foreground">보유 {currentUser.freeTickets}장 · 정모 신청 시 사용 가능</span>
+            </div>
+          </div>
+        )}
+      </section>
 
       {/* 급수 · 전화번호 수정 */}
       <section className="flex flex-col gap-4">
@@ -138,8 +193,8 @@ export function MyProfile({ currentUser, onUpdate, onChangePassword, onLogout }:
 
         {infoError && <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{infoError}</p>}
 
-        <Button className="w-full" size="lg" disabled={!isInfoDirty} onClick={handleInfoSave}>
-          저장하기
+        <Button className="w-full" size="lg" disabled={!isInfoDirty || infoLoading} onClick={handleInfoSave}>
+          {infoLoading ? "저장 중..." : "저장하기"}
         </Button>
       </section>
 
@@ -166,8 +221,8 @@ export function MyProfile({ currentUser, onUpdate, onChangePassword, onLogout }:
 
         {pwError && <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{pwError}</p>}
 
-        <Button variant="outline" className="w-full" disabled={!currentPw || !newPw || !confirmPw} onClick={handlePasswordSave}>
-          비밀번호 변경
+        <Button variant="outline" className="w-full" disabled={!currentPw || !newPw || !confirmPw || pwLoading} onClick={handlePasswordSave}>
+          {pwLoading ? "변경 중..." : "비밀번호 변경"}
         </Button>
       </section>
 

@@ -1,8 +1,10 @@
 import { useState } from "react"
+import bbangbungLogo from "@/assets/bbangbung_logo.png"
 import { Button } from "@/components/ui/button"
 import { PasswordInput } from "@/components/ui/password-input"
 import { cn, formatPhone } from "@/lib/utils"
 import { LEVEL_COLORS } from "@/lib/badminton"
+import { getErrorMessage } from "@/lib/api"
 import type { BadmintonLevel, Gender } from "@/types"
 
 const LEVELS: BadmintonLevel[] = ["S", "A", "B", "C", "D"]
@@ -28,7 +30,7 @@ export function Auth({ onLogin, onSignup }: AuthProps) {
     <div className="flex min-h-svh flex-col items-center justify-center bg-background px-4">
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
-          <div className="mb-3 text-5xl">🏸</div>
+          <img src={bbangbungLogo} alt="빵벙" className="mx-auto mb-3 h-16 w-auto" />
           <h1 className="text-2xl font-bold">빵벙</h1>
           <p className="mt-1 text-sm text-muted-foreground">배드민턴 정모 예약 관리</p>
         </div>
@@ -78,8 +80,8 @@ function LoginForm({
     setLoading(true)
     try {
       await onLogin(phone.replace(/-/g, ""), password)
-    } catch {
-      setError("전화번호 또는 비밀번호가 올바르지 않습니다.")
+    } catch (e) {
+      setError(getErrorMessage(e))
     } finally {
       setLoading(false)
     }
@@ -165,8 +167,9 @@ function SignupForm({
         phone: phone.replace(/-/g, ""),
         password,
       })
-    } catch {
-      setError("이미 가입된 전화번호입니다.")
+    } catch (e) {
+      console.error("[signup error]", e)
+      setError(getErrorMessage(e))
     } finally {
       setLoading(false)
     }

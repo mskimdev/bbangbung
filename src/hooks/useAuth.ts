@@ -1,16 +1,8 @@
 import { useState, useEffect } from "react"
 import type { Member } from "@/types"
-import api from "@/lib/api"
+import api, { getErrorMessage } from "@/lib/api"
 
 type ShowToast = (message: string, type?: "success" | "error") => void
-
-function getErrorMessage(error: unknown): string {
-  if (error && typeof error === "object" && "response" in error) {
-    const res = (error as any).response
-    if (res?.data?.message) return res.data.message
-  }
-  return "오류가 발생했습니다."
-}
 
 function mapMember(m: any): Member {
   return {
@@ -20,9 +12,11 @@ function mapMember(m: any): Member {
     gender: m.gender,
     level: m.level,
     phone: m.phone,
-    password: m.password,
     joinedAt: m.joinedAt,
     isAdmin: m.isAdmin,
+    freeTickets: m.freeTickets ?? 0,
+    totalAttendance: m.totalAttendance ?? 0,
+    monthlyAttendance: m.monthlyAttendance ?? 0,
   }
 }
 
@@ -68,13 +62,12 @@ export function useAuth(showToast: ShowToast) {
     setCurrentUser(null)
   }
 
-  async function handleUpdateProfile(updated: Pick<Member, "level" | "phone" | "password">) {
+  async function handleUpdateProfile(updated: Pick<Member, "level" | "phone">) {
     if (!currentUser) return
     try {
       const { data: m } = await api.patch(`/members/${currentUser.id}`, {
         level: updated.level,
         phone: updated.phone,
-        password: updated.password,
       })
       const next = mapMember(m)
       setCurrentUser(next)
@@ -82,6 +75,7 @@ export function useAuth(showToast: ShowToast) {
       return next
     } catch (e) {
       showToast(getErrorMessage(e), "error")
+      throw e
     }
   }
 
@@ -96,5 +90,12 @@ export function useAuth(showToast: ShowToast) {
     }
   }
 
-  return { currentUser, authLoading, handleLogin, handleSignup, handleLogout, handleUpdateProfile, handleChangePassword }
+  async function refreshCurrentUser() {
+    try {
+      const { data } = await api.get("/members/me")
+      setCurrentUser(mapMember(data))
+    } catch {}
+  }
+
+  return { currentUser, authLoading, handleLogin, handleSignup, handleLogout, handleUpdateProfile, handleChangePassword, refreshCurrentUser }
 }

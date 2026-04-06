@@ -35,6 +35,12 @@ export function formatDate(dateStr: string) {
   })
 }
 
+export function formatTime(time: string) {
+  return time.slice(0, 5)
+}
+
 export function formatFee(fee: number) {
   return fee.toLocaleString("ko-KR") + "원"
 }
+
+export const BANK_ACCOUNT = import.meta.env.VITE_BANK_ACCOUNT ?? "카카오뱅크 3333-13-2412487 김민수"

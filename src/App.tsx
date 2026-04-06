@@ -19,7 +19,7 @@ import { useSessionSse } from "@/hooks/useSessionSse"
 export default function App() {
   const [showOnboarding, setShowOnboarding] = useState(false)
 
-  const { page, selectedSessionId, navigate, resetNavigation } = useNavigation()
+  const { page, previousPage, selectedSessionId, navigate, resetNavigation } = useNavigation()
   const { toast, showToast, hideToast } = useToast()
 
   const {
@@ -28,6 +28,7 @@ export default function App() {
     refreshSession,
     handleCreateSession,
     handleConfirmPayment,
+    handleConfirmAll,
     handlePromoteFromWaitlist,
     handleCancelParticipant,
     handleUpdateSessionStatus,
@@ -35,11 +36,11 @@ export default function App() {
     handleDeleteSession,
   } = useSessions(showToast)
 
-  const { currentUser, authLoading, handleLogin, handleSignup, handleLogout, handleUpdateProfile, handleChangePassword } =
+  const { currentUser, authLoading, handleLogin, handleSignup, handleLogout, handleUpdateProfile, handleChangePassword, refreshCurrentUser } =
     useAuth(showToast)
 
   const { reservations, handleReserve, handleWaitlist, handleCancel } =
-    useReservations(currentUser, refreshSession, showToast)
+    useReservations(currentUser, refreshSession, showToast, refreshCurrentUser)
 
   // SessionDetail이 열려 있을 때만 해당 세션 SSE 구독 (early return 이전에 위치해야 Rules of Hooks 준수)
   useSessionSse(
@@ -49,6 +50,9 @@ export default function App() {
       setSessions((prev) => prev.filter((s) => s.id !== selectedSessionId))
       navigate("sessions")
       showToast("삭제된 정모입니다.", "error")
+    },
+    () => {
+      if (selectedSessionId) refreshSession(selectedSessionId)
     },
   )
 
@@ -99,10 +103,12 @@ export default function App() {
             session={selectedSession}
             currentUser={currentUser}
             reservations={reservations}
+            previousPage={previousPage}
             onNavigate={navigate}
             onReserve={handleReserve}
             onWaitlist={handleWaitlist}
             onCancel={handleCancel}
+            onToast={showToast}
           />
         )}
         {page === "my-reservations" && (
@@ -114,6 +120,7 @@ export default function App() {
             currentUser={currentUser}
             onNavigate={navigate}
             onConfirmPayment={handleConfirmPayment}
+            onConfirmAll={handleConfirmAll}
             onCancelParticipant={handleCancelParticipant}
             onPromoteFromWaitlist={handlePromoteFromWaitlist}
             onCreateSession={handleCreateSession}

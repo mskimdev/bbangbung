@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react"
 import type { BbangSession, SessionParticipant } from "@/types"
 
-const BASE_URL = "http://localhost:8080/api"
+const BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8080/api"
 
 function mapSession(s: any): BbangSession {
   return {
@@ -35,37 +35,69 @@ export function useSessionSse(
   sessionId: string | null,
   onUpdate: (session: BbangSession) => void,
   onDeleted?: () => void,
+  onReconnect?: () => void,
 ) {
   const onUpdateRef = useRef(onUpdate)
   onUpdateRef.current = onUpdate
   const onDeletedRef = useRef(onDeleted)
   onDeletedRef.current = onDeleted
+  const onReconnectRef = useRef(onReconnect)
+  onReconnectRef.current = onReconnect
 
   useEffect(() => {
     if (!sessionId) return
 
-    const es = new EventSource(`${BASE_URL}/sessions/${sessionId}/stream`)
+    const token = localStorage.getItem("token")
+    if (!token) return
 
-    es.addEventListener("session-update", (e) => {
-      try {
-        const raw = JSON.parse(e.data)
-        onUpdateRef.current(mapSession(raw))
-      } catch {
-        // 파싱 실패 시 무시
+    let es: EventSource
+    let isDeleted = false
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+
+    function connect() {
+      es = new EventSource(`${BASE_URL}/sessions/${sessionId}/stream?token=${encodeURIComponent(token!)}`)
+      let isFirstOpen = true
+
+      es.onopen = () => {
+        if (isFirstOpen) {
+          isFirstOpen = false
+          return
+        }
+        // 재연결 시 최신 상태 동기화
+        onReconnectRef.current?.()
       }
-    })
 
-    es.addEventListener("session-deleted", () => {
-      es.close()
-      onDeletedRef.current?.()
-    })
+      es.addEventListener("session-update", (e) => {
+        try {
+          const raw = JSON.parse(e.data)
+          onUpdateRef.current(mapSession(raw))
+        } catch {
+          // 파싱 실패 시 무시
+        }
+      })
 
-    es.onerror = () => {
-      // 연결 끊기면 브라우저가 자동 재연결 시도하므로 별도 처리 불필요
+      es.addEventListener("session-deleted", () => {
+        isDeleted = true
+        es.close()
+        onDeletedRef.current?.()
+      })
+
+      es.onerror = () => {
+        if (isDeleted) return
+        es.close()
+        // 3초 후 재연결 시도
+        reconnectTimer = setTimeout(() => {
+          if (!isDeleted) connect()
+        }, 3000)
+      }
     }
 
+    connect()
+
     return () => {
-      es.close()
+      isDeleted = true
+      if (reconnectTimer) clearTimeout(reconnectTimer)
+      es?.close()
     }
   }, [sessionId])
 }
