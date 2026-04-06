@@ -1,11 +1,11 @@
 import type { BadmintonLevel, BbangSession, SessionStatus } from "@/types"
 
 export const LEVEL_COLORS: Record<BadmintonLevel, string> = {
-  S: "bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300",
-  A: "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300",
-  B: "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300",
-  C: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
-  D: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
+  S: "bg-purple-100 text-purple-800 dark:bg-purple-900/60 dark:text-purple-200",
+  A: "bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-200",
+  B: "bg-green-100 text-green-800 dark:bg-green-900/60 dark:text-green-200",
+  C: "bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200",
+  D: "bg-gray-100 text-gray-700 dark:bg-gray-700/60 dark:text-gray-200",
 }
 
 export const STATUS_CONFIG: Record<

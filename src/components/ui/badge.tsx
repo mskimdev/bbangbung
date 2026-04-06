@@ -9,9 +9,9 @@ interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
 const variantClasses: Record<BadgeVariant, string> = {
   default: "bg-primary text-primary-foreground",
   secondary: "bg-secondary text-secondary-foreground",
-  success: "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300",
-  warning: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
-  destructive: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
+  success: "bg-green-100 text-green-800 dark:bg-green-900/60 dark:text-green-200",
+  warning: "bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200",
+  destructive: "bg-red-100 text-red-700 dark:bg-red-900/60 dark:text-red-200",
   outline: "border border-border text-foreground",
 }
 
