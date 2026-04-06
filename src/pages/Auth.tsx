@@ -193,7 +193,9 @@ function SignupForm({
             <button key={g} type="button" onClick={() => setGender(g)}
               className={cn(
                 "flex flex-1 items-center justify-center gap-2 rounded-xl border py-3 text-sm font-medium transition-colors",
-                gender === g ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:border-foreground"
+                gender === g && g === "male"   ? "border-blue-400 bg-blue-50 text-blue-700 dark:border-blue-500 dark:bg-blue-900/40 dark:text-blue-300" :
+                gender === g && g === "female" ? "border-pink-400 bg-pink-50 text-pink-700 dark:border-pink-500 dark:bg-pink-900/40 dark:text-pink-300" :
+                "border-border text-muted-foreground hover:border-foreground"
               )}
             >
               {g === "male" ? "남성" : "여성"}
