@@ -27,6 +27,7 @@ function mapSession(s: any): BbangSession {
       level: p.level,
       reservedAt: p.reservedAt,
       status: p.status,
+      usedFreeTicket: p.usedFreeTicket ?? false,
     })),
   }
 }
