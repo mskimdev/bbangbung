@@ -29,8 +29,13 @@ const RESERVATION_BADGE = {
 export function Home({ currentUser, sessions, reservations, onNavigate }: HomeProps) {
   const [dismissedPendingBanner, setDismissedPendingBanner] = useState(false)
   const todayStr = new Date().toLocaleDateString("sv") // "YYYY-MM-DD" 로컬 기준
+  const reservedSessionIds = new Set(reservations
+    .filter((r) => r.status === "confirmed" || r.status === "pending" || r.status === "waitlisted")
+    .map((r) => r.sessionId)
+  )
+
   const upcomingSessions = sessions
-    .filter((s) => s.status === "open" && s.date >= todayStr)
+    .filter((s) => s.status === "open" && s.date >= todayStr && !reservedSessionIds.has(s.id))
     .sort((a, b) => a.date.localeCompare(b.date))
     .slice(0, 3)
 

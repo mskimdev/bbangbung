@@ -11,7 +11,7 @@ const LEVELS: BadmintonLevel[] = ["S", "A", "B", "C", "D"]
 interface CreateSessionProps {
   organizer: string
   initialData?: BbangSession
-  onSubmit: (session: Omit<BbangSession, "id" | "currentParticipants" | "participants" | "status">) => void
+  onSubmit: (session: Omit<BbangSession, "id" | "currentParticipants" | "participants" | "status">) => Promise<void>
   onBack: () => void
 }
 
@@ -30,6 +30,7 @@ export function CreateSession({ organizer, initialData, onSubmit, onBack }: Crea
   const [description, setDescription]  = useState(initialData?.description ?? "")
   const [levelRestriction, setLevelRestriction] = useState<BadmintonLevel[]>(initialData?.levelRestriction ?? [])
   const [error, setError]               = useState("")
+  const [loading, setLoading]           = useState(false)
   const [showBackConfirm, setShowBackConfirm] = useState(false)
   const [isDirty, setIsDirty]           = useState(false)
 
@@ -68,20 +69,25 @@ export function CreateSession({ organizer, initialData, onSubmit, onBack }: Crea
       return
     }
 
-    onSubmit({
-      title: title.trim(),
-      date,
-      startTime,
-      endTime,
-      location: location.trim(),
-      address: address.trim(),
-      courtCount: parseInt(courtCount),
-      maxParticipants: parseInt(maxParticipants),
-      fee: parseInt(fee) || 0,
-      description: description.trim(),
-      organizer,
-      levelRestriction: levelRestriction.length > 0 ? levelRestriction : null,
-    })
+    setLoading(true)
+    try {
+      await onSubmit({
+        title: title.trim(),
+        date,
+        startTime,
+        endTime,
+        location: location.trim(),
+        address: address.trim(),
+        courtCount: parseInt(courtCount),
+        maxParticipants: parseInt(maxParticipants),
+        fee: parseInt(fee) || 0,
+        description: description.trim(),
+        organizer,
+        levelRestriction: levelRestriction.length > 0 ? levelRestriction : null,
+      })
+    } finally {
+      setLoading(false)
+    }
   }
 
   const today = new Date().toISOString().slice(0, 10)
@@ -244,8 +250,8 @@ export function CreateSession({ organizer, initialData, onSubmit, onBack }: Crea
         <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
       )}
 
-      <Button type="submit" size="lg" className="w-full">
-        {isEdit ? "수정 완료" : "정모 생성하기"}
+      <Button type="submit" size="lg" className="w-full" disabled={loading}>
+        {loading ? (isEdit ? "수정 중..." : "생성 중...") : (isEdit ? "수정 완료" : "정모 생성하기")}
       </Button>
 
       {showBackConfirm && (

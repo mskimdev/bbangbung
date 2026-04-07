@@ -42,6 +42,7 @@ export function useAuth(showToast: ShowToast) {
     localStorage.setItem("token", data.token)
     const member = mapMember(data.member)
     setCurrentUser(member)
+    showToast(`환영합니다, ${member.name}님!`)
     return member
   }
 
@@ -60,6 +61,7 @@ export function useAuth(showToast: ShowToast) {
   function handleLogout() {
     localStorage.removeItem("token")
     setCurrentUser(null)
+    showToast("로그아웃 되었습니다.")
   }
 
   async function handleUpdateProfile(updated: Pick<Member, "level" | "phone">) {

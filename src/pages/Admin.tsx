@@ -19,9 +19,9 @@ interface AdminProps {
   onConfirmAll: (sessionId: string) => Promise<void>
   onCancelParticipant: (sessionId: string, memberId: string) => Promise<void>
   onPromoteFromWaitlist: (sessionId: string, memberId: string) => Promise<void>
-  onCreateSession: (session: Omit<BbangSession, "id" | "currentParticipants" | "participants" | "status">, organizerId: string) => void
+  onCreateSession: (session: Omit<BbangSession, "id" | "currentParticipants" | "participants" | "status">, organizerId: string) => Promise<void>
   onUpdateSessionStatus: (sessionId: string, status: SessionStatus) => Promise<void>
-  onEditSession: (sessionId: string, data: Omit<BbangSession, "id" | "currentParticipants" | "participants" | "status">) => void
+  onEditSession: (sessionId: string, data: Omit<BbangSession, "id" | "currentParticipants" | "participants" | "status">) => Promise<void>
   onDeleteSession: (sessionId: string) => void
   showToast: (message: string, type?: "success" | "error") => void
 }
@@ -110,8 +110,8 @@ export function Admin({ sessions, currentUser, onNavigate, onConfirmPayment, onC
     return (
       <CreateSession
         organizer={currentUser.name}
-        onSubmit={(data) => {
-          onCreateSession(data, currentUser.id)
+        onSubmit={async (data) => {
+          await onCreateSession(data, currentUser.id)
           setSessionsView("list")
         }}
         onBack={() => setSessionsView("list")}
@@ -125,8 +125,8 @@ export function Admin({ sessions, currentUser, onNavigate, onConfirmPayment, onC
       <CreateSession
         organizer={currentUser.name}
         initialData={selectedSession}
-        onSubmit={(data) => {
-          onEditSession(selectedSession.id, data)
+        onSubmit={async (data) => {
+          await onEditSession(selectedSession.id, data)
           setSessionsView("detail")
         }}
         onBack={() => setSessionsView("detail")}
