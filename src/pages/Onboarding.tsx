@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { CalendarDays, BanknoteIcon, CheckCircle2, MapPin, Users } from "lucide-react"
+import { CalendarDays, BanknoteIcon, CheckCircle2, Clock, Ticket, BookOpen } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
@@ -10,39 +10,30 @@ interface OnboardingProps {
 
 const STEPS = [
   {
-    title: (name: string) => `${name}님, 환영해요!`,
-    subtitle: "빵벙은 배드민턴 정모를 쉽게 찾고 예약할 수 있는 서비스예요.",
+    title: (name: string) => `${name}님, 반갑습니다.`,
+    subtitle: "배드민턴 정모 예약을 여기서 관리하세요.",
     content: (
-      <div className="flex flex-col gap-4">
-        <div className="flex flex-col items-center gap-3 rounded-2xl bg-primary/5 py-8">
-          <span className="text-6xl">🏸</span>
-          <p className="text-base font-semibold">배드민턴 정모 예약 관리</p>
+      <div className="flex flex-col items-center justify-center gap-6 py-10">
+        <div className="flex size-24 items-center justify-center rounded-3xl bg-primary/10">
+          <CalendarDays className="size-12 text-primary" />
         </div>
-        <div className="flex flex-col gap-3">
-          {[
-            { icon: CalendarDays, text: "원하는 날짜와 장소의 정모를 찾을 수 있어요" },
-            { icon: Users,        text: "참가자 현황과 레벨 분포를 한눈에 확인해요" },
-            { icon: MapPin,       text: "장소 정보와 상세 안내를 미리 볼 수 있어요" },
-          ].map(({ icon: Icon, text }) => (
-            <div key={text} className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3">
-              <Icon className="size-5 shrink-0 text-primary" />
-              <span className="text-sm">{text}</span>
-            </div>
-          ))}
+        <div className="text-center">
+          <p className="text-lg font-semibold">빵벙</p>
+          <p className="mt-1 text-sm text-muted-foreground">정모 찾기부터 예약 확정까지 한 곳에서.</p>
         </div>
       </div>
     ),
   },
   {
-    title: () => "예약은 이렇게 해요",
-    subtitle: "신청 후 계좌이체까지 완료해야 예약이 최종 확정돼요.",
+    title: () => "예약 흐름",
+    subtitle: "신청 후 계좌이체를 완료하면 관리자가 확정합니다.",
     content: (
       <div className="flex flex-col gap-3">
         {[
           {
             step: "1",
             label: "정모 신청",
-            desc: "원하는 정모를 찾아 신청하기 버튼을 눌러요",
+            desc: "원하는 정모를 찾아 신청하기를 누릅니다",
             icon: CalendarDays,
             bg: "bg-blue-50 dark:bg-blue-900/20",
             border: "border-blue-200 dark:border-blue-800",
@@ -52,7 +43,7 @@ const STEPS = [
           {
             step: "2",
             label: "참가비 계좌이체",
-            desc: "세션에 안내된 계좌로 참가비를 이체해요",
+            desc: "안내된 계좌로 참가비를 이체합니다",
             icon: BanknoteIcon,
             bg: "bg-amber-50 dark:bg-amber-900/20",
             border: "border-amber-200 dark:border-amber-800",
@@ -61,8 +52,8 @@ const STEPS = [
           },
           {
             step: "3",
-            label: "관리자 확인 후 확정",
-            desc: "관리자가 입금을 확인하면 예약이 확정돼요",
+            label: "관리자 확정",
+            desc: "입금 확인 후 예약이 확정됩니다",
             icon: CheckCircle2,
             bg: "bg-green-50 dark:bg-green-900/20",
             border: "border-green-200 dark:border-green-800",
@@ -90,39 +81,29 @@ const STEPS = [
     ),
   },
   {
-    title: () => "이런 것도 있어요",
-    subtitle: "알아두면 유용한 빵벙의 기능들을 소개할게요.",
+    title: () => "알아두면 좋은 것들",
+    subtitle: "",
     content: (
       <div className="flex flex-col gap-3">
         {[
           {
-            icon: "⏳",
+            icon: Clock,
             label: "대기 신청",
-            desc: "정원이 찼어도 대기 신청을 할 수 있어요. 자리가 나면 관리자가 입금 요청을 드려요.",
+            desc: "정원이 찼을 때 대기 신청이 가능합니다. 자리가 나면 관리자가 입금 요청을 드립니다.",
           },
           {
-            icon: "🔔",
-            label: "입금 대기 알림",
-            desc: "홈 화면에서 입금 대기 중인 예약을 바로 확인할 수 있어요.",
-          },
-          {
-            icon: "🎟️",
+            icon: Ticket,
             label: "무료 참여권",
-            desc: "10회 참여 시 무료 참여권 1장이 적립돼요. 다음 정모 신청 시 참가비 없이 바로 확정할 수 있어요.",
+            desc: "10회 참여 시 1장이 적립됩니다. 다음 정모를 참가비 없이 바로 확정할 수 있습니다.",
           },
           {
-            icon: "📋",
-            label: "내 예약 관리",
-            desc: "예약 탭에서 예정 모임과 지난 모임 이력을 한눈에 볼 수 있어요.",
+            icon: BookOpen,
+            label: "내 예약",
+            desc: "예약 탭에서 예정 모임과 지난 모임 이력을 확인할 수 있습니다.",
           },
-          {
-            icon: "👤",
-            label: "프로필 수정",
-            desc: "급수나 연락처는 내 정보 탭에서 언제든지 수정할 수 있어요.",
-          },
-        ].map(({ icon, label, desc }) => (
+        ].map(({ icon: Icon, label, desc }) => (
           <div key={label} className="flex items-start gap-3 rounded-xl border border-border bg-card p-4">
-            <span className="text-xl leading-none">{icon}</span>
+            <Icon className="size-5 shrink-0 text-primary mt-0.5" />
             <div className="flex flex-col gap-0.5">
               <span className="text-sm font-semibold">{label}</span>
               <span className="text-xs leading-relaxed text-muted-foreground">{desc}</span>
@@ -178,7 +159,7 @@ export function Onboarding({ userName, onDone }: OnboardingProps) {
             className="w-full"
             onClick={() => isLast ? onDone() : setStep((s) => s + 1)}
           >
-            {isLast ? "빵벙 시작하기 🏸" : "다음"}
+            {isLast ? "시작하기" : "다음"}
           </Button>
           {!isLast && (
             <button
