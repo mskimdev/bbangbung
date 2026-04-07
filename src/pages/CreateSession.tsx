@@ -40,7 +40,7 @@ export function CreateSession({ organizer, initialData, onSubmit, onBack }: Crea
     )
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError("")
 
