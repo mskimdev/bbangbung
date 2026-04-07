@@ -348,9 +348,13 @@ function ParticipantChip({
     ? "border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-900/20"
     : "border-pink-200 bg-pink-50 dark:border-pink-800 dark:bg-pink-900/20"
 
+  const pendingGenderBase = isMale
+    ? "border-dashed border-blue-300 bg-blue-50/50 dark:border-blue-700 dark:bg-blue-900/10"
+    : "border-dashed border-pink-300 bg-pink-50/50 dark:border-pink-700 dark:bg-pink-900/10"
+
   const variantClass = {
     confirmed:  cn(genderBase, isSelf && (isMale ? "border-blue-400" : "border-pink-400") + " ring-1 " + (isMale ? "ring-blue-300" : "ring-pink-300")),
-    pending:    cn("border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-900/20", isSelf && "border-amber-400"),
+    pending:    cn(pendingGenderBase, isSelf && (isMale ? "border-blue-400" : "border-pink-400")),
     waitlisted: cn("border-dashed border-border bg-muted/30", isSelf && "border-muted-foreground"),
   }[variant]
 
