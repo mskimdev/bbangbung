@@ -133,22 +133,10 @@ export function CreateSession({ organizer, initialData, onSubmit, onBack }: Crea
         </Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="시작 시간" required>
-            <input
-              type="time"
-              value={startTime}
-              onChange={(e) => setStartTime(e.target.value)}
-              className={inputClass}
-              required
-            />
+            <TimeSelect value={startTime} onChange={setStartTime} />
           </Field>
           <Field label="종료 시간" required>
-            <input
-              type="time"
-              value={endTime}
-              onChange={(e) => setEndTime(e.target.value)}
-              className={inputClass}
-              required
-            />
+            <TimeSelect value={endTime} onChange={setEndTime} />
           </Field>
         </div>
       </div>
@@ -294,3 +282,43 @@ function Field({
 
 const inputClass =
   "w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
+
+const HOURS = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, "0"))
+const MINUTES = ["00", "30"]
+
+function TimeSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [h, m] = value ? value.slice(0, 5).split(":") : ["", ""]
+
+  function handleHour(hour: string) {
+    onChange(`${hour}:${m || "00"}`)
+  }
+
+  function handleMinute(minute: string) {
+    onChange(`${h || "00"}:${minute}`)
+  }
+
+  return (
+    <div className="flex gap-1.5">
+      <select
+        value={h}
+        onChange={(e) => handleHour(e.target.value)}
+        className={cn(inputClass, "flex-1 cursor-pointer")}
+      >
+        <option value="" disabled>시</option>
+        {HOURS.map((hour) => (
+          <option key={hour} value={hour}>{hour}시</option>
+        ))}
+      </select>
+      <select
+        value={m}
+        onChange={(e) => handleMinute(e.target.value)}
+        className={cn(inputClass, "w-20 cursor-pointer")}
+      >
+        <option value="" disabled>분</option>
+        {MINUTES.map((min) => (
+          <option key={min} value={min}>{min}분</option>
+        ))}
+      </select>
+    </div>
+  )
+}
