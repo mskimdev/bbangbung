@@ -47,8 +47,8 @@ export function CreateSession({ organizer, initialData, onSubmit, onBack }: Crea
       setError("시작 시간과 종료 시간을 입력해주세요.")
       return
     }
-    if (endTime <= startTime) {
-      setError("종료 시간은 시작 시간보다 늦어야 합니다.")
+    if (endTime === startTime) {
+      setError("시작 시간과 종료 시간이 같을 수 없습니다.")
       return
     }
     if (!isEdit && date < today) {
