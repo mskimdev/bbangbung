@@ -25,6 +25,7 @@ const BACK_LABEL: Partial<Record<Page, string>> = {
   home: "홈",
   sessions: "정모 목록",
   "my-reservations": "내 예약",
+  "session-match": "코트 배정",
 }
 
 export function SessionDetail({
@@ -67,6 +68,7 @@ export function SessionDetail({
   )
 
   const levelAllowed = !session.levelRestriction || session.levelRestriction.includes(currentUser.level)
+  const isToday = new Date().toLocaleDateString("sv") === session.date && session.status !== "completed"
 
   // 대기 순번 (1부터)
   const myWaitlistPosition = waitlistedParticipants.findIndex(
@@ -192,7 +194,17 @@ export function SessionDetail({
 
       {/* Participant chips */}
       <section>
-        <h2 className="mb-3 font-semibold">참가자 목록</h2>
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="font-semibold">참가자 목록</h2>
+          {new Date().toLocaleDateString("sv") === session.date && confirmedParticipants.length > 0 && (
+            <button
+              onClick={() => onNavigate("session-match")}
+              className="text-xs text-primary hover:underline"
+            >
+              코트 현황 보기 →
+            </button>
+          )}
+        </div>
         {confirmedParticipants.length === 0 && pendingParticipants.length === 0 && waitlistedParticipants.length === 0 ? (
           <p className="py-4 text-center text-sm text-muted-foreground">아직 참가자가 없습니다</p>
         ) : (
@@ -232,13 +244,28 @@ export function SessionDetail({
       <div className="fixed bottom-16 left-0 right-0 border-t border-border bg-background/95 px-4 py-3 backdrop-blur-sm">
         <div className="mx-auto max-w-lg">
           {myParticipant?.status === "confirmed" && myReservation ? (
-            <div className="flex items-center gap-3">
-              <div className="flex-1">
-                <p className="text-sm font-medium text-primary">예약 확정</p>
-                <p className="text-xs text-muted-foreground">참가비 {formatFee(session.fee)} 납부 완료</p>
+            isToday ? (
+              <div className="flex flex-col gap-2">
+                <Button className="w-full" size="lg" onClick={() => onNavigate("session-match", session.id)}>
+                  실시간 코트 현황 보기
+                </Button>
+                <button
+                  disabled={actionLoading}
+                  onClick={() => setShowCancelConfirm(true)}
+                  className="text-xs text-muted-foreground hover:text-destructive text-center"
+                >
+                  예약 취소
+                </button>
               </div>
-              <Button variant="destructive" disabled={actionLoading} onClick={() => setShowCancelConfirm(true)}>예약 취소</Button>
-            </div>
+            ) : (
+              <div className="flex items-center gap-3">
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-primary">예약 확정</p>
+                  <p className="text-xs text-muted-foreground">참가비 {formatFee(session.fee)} 납부 완료</p>
+                </div>
+                <Button variant="destructive" disabled={actionLoading} onClick={() => setShowCancelConfirm(true)}>예약 취소</Button>
+              </div>
+            )
           ) : myParticipant?.status === "pending" && myReservation ? (
             <div className="flex items-center gap-3">
               <div className="flex-1">

@@ -2,7 +2,7 @@ export type BadmintonLevel = "S" | "A" | "B" | "C" | "D"
 export type Gender = "male" | "female"
 export type SessionStatus = "open" | "closed" | "completed" | "cancelled"
 export type ReservationStatus = "confirmed" | "pending" | "waitlisted" | "cancelled"
-export type Page = "home" | "sessions" | "session-detail" | "my-reservations" | "profile" | "admin"
+export type Page = "home" | "sessions" | "session-detail" | "session-match" | "session-play" | "my-reservations" | "profile" | "admin"
 
 export interface Member {
   id: string
@@ -45,6 +45,12 @@ export interface BbangSession {
   description: string
   organizer: string
   participants: SessionParticipant[]
+}
+
+export interface CourtSlotApi {
+  courtNumber: number
+  status: "idle" | "playing" | "pending"
+  slots: (string | null)[]  // 4 elements — member IDs, null for empty
 }
 
 export interface Reservation {

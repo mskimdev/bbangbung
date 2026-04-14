@@ -46,7 +46,9 @@ src/
 ├── pages/
 │   ├── Auth.tsx                     # 로그인 / 회원가입 (API 연동)
 │   ├── Onboarding.tsx               # 회원가입 직후 1회 표시되는 앱 안내 (3단계)
-│   ├── Home.tsx                     # 대시보드 (예정 모임, 입금 대기 알림)
+│   ├── Home.tsx                     # 대시보드 (예정 모임, 입금 대기 알림, 정모 진행 중 배너)
+│   ├── MatchingPage.tsx             # 참가자용 실시간 코트 현황 뷰어 (SSE 구독)
+│   ├── SessionPlay.tsx              # 관리자용 정모 진행 화면 (코트 배정 + 대기 게임 + 자동 배정)
 │   ├── SessionList.tsx              # 세션 목록 + 상태 필터
 │   ├── SessionDetail.tsx            # 세션 상세 + 예약/대기/취소 CTA
 │   ├── MyReservations.tsx           # 내 예약 목록 (예정/지난 탭)
@@ -181,6 +183,12 @@ src/main/java/com/web/bbangbungbe/
 | PATCH | `/promote` | ADMIN | 대기자 승격 (waitlisted → pending) |
 | DELETE | `/admin` | ADMIN | 강제 취소 |
 
+### 코트 배정 (`/api/sessions/{sessionId}/courts`)
+| 메서드 | 경로 | 인증 | 설명 |
+|--------|------|------|------|
+| GET | `/` | 불필요 | 현재 코트 배정 현황 조회 (CourtSlotApi[]) |
+| PUT | `/` | ADMIN | 코트 배정 저장 + SSE `court-update` push |
+
 ---
 
 ## 핵심 타입 (`src/types.ts`)
@@ -190,7 +198,7 @@ type BadmintonLevel = "S" | "A" | "B" | "C" | "D"   // S=프로, D=초보
 type Gender = "male" | "female"
 type SessionStatus = "open" | "closed" | "completed" | "cancelled"
 type ReservationStatus = "confirmed" | "pending" | "waitlisted" | "cancelled"
-type Page = "home" | "sessions" | "session-detail" | "my-reservations" | "profile" | "admin"
+type Page = "home" | "sessions" | "session-detail" | "session-match" | "session-play" | "my-reservations" | "profile" | "admin"
 
 interface Member { id, name, birthdate, gender, level, phone, password, joinedAt, isAdmin }
 interface BbangSession { id, title, date, startTime, endTime, location, address, courtCount,
@@ -199,6 +207,8 @@ interface BbangSession { id, title, date, startTime, endTime, location, address,
 interface SessionParticipant { memberId, memberName, gender, level, reservedAt, status }
 interface Reservation { id, sessionId, sessionTitle, date, startTime, endTime,
                         location, fee, status, createdAt }
+// 코트 슬롯 API 응답/요청 타입
+interface CourtSlotApi { courtNumber: number; status: "idle" | "playing"; slots: (string | null)[] }
 ```
 
 ---
@@ -400,6 +410,32 @@ closed         → open (모집 재개)
   - ConfirmDialog `pb-8` → `pb-24` (모바일 네비바 가림 수정)
   - Toast `bottom-24` → `bottom-32` (모바일 네비바 위로 올림)
   - 계좌 정보 레이아웃 개선 — 은행명/계좌번호/예금주 분리 표시
+- [x] **실시간 코트 배정 (정모 진행 기능)** — `SessionPlay.tsx`, `MatchingPage.tsx`, `court_game` DB 테이블
+  - **관리자용 `SessionPlay.tsx`** (`session-play` 페이지, Admin에서 진입)
+    - 4슬롯 코트 그리드, 게임 시작/종료, 이력 기록, 각 코트 "비우기" 버튼
+    - **Auto / 수동 모드 토글**
+      - Auto 모드 ON: "자동 배정" 버튼 → 모든 빈 코트 + 대기 게임 한번에 채움 (`free` 타입)
+      - Auto 모드 ON + 경기 종료: 해당 코트 자동으로 바로 재배정
+      - 수동 모드 (기본): 빈 코트/대기게임 카드에 `[자유] [혼복] [남복] [여복]` 버튼으로 1코트씩 배정
+      - 양 모드 공통: 빈 슬롯 `+` 클릭 → PlayerPicker 바텀시트로 한 명씩 직접 배정 가능
+    - **대기 게임** (pendingGames): 코트 수만큼 생성 상한, 수동/자동 배정 모두 지원
+      - "코트 배정" 버튼으로 빈 idle 코트에 이동
+      - 대기 게임도 동일하게 `[자유] [혼복] [남복] [여복]` 버튼 + 슬롯 직접 배정
+    - `saveCourts(courts, pending)`: 실제 코트(courtNumber 1~N) + 대기게임(courtNumber N+1~)을 함께 저장
+    - 마운트 시 API로 상태 복원 — courtNumber 기반으로 실제 코트/대기게임 구분, padding 처리
+  - **참가자용 `MatchingPage.tsx`** (`session-match` 페이지)
+    - SSE `court-update` 이벤트 구독으로 실시간 반영
+    - `courtNumber <= session.courtCount` → 실제 코트, 초과 → 대기 게임 (status 대소문자 무관)
+    - 실제 코트 현황 + 대기 게임 섹션 + 대기 중 섹션 (항상 표시, 0명이면 "없음" 메시지)
+    - "내 코트" 강조, "나" 배지, 내 슬롯 ring
+  - `Home.tsx` — 오늘 closed 세션 + 내가 confirmed인 경우 "정모 진행 중" 배너 → `session-match` 이동
+  - `SessionDetail.tsx` — "코트 현황 보기 →" 버튼: `status === "closed" && confirmedParticipants.length > 0`
+  - `CourtSlotApi.status`: `"idle" | "playing" | "pending"`
+  - **백엔드**: `court_game` 테이블, `CourtGameService`, `CourtGameController`, `SessionSseService.notifyCourts()`
+    - DB: `session_id, court_number, status(VARCHAR20), slot0~slot3_member_id`, UNIQUE `(session_id, court_number)`
+    - `GET /api/sessions/{id}/courts` — permitAll, `PUT` — ADMIN only
+    - PUT 시 기존 rows delete + 새로 insert + SSE `court-update` push
+    - 대기 게임은 `courtNumber > session.courtCount`로 구분 (별도 테이블 없음)
 
 ---
 

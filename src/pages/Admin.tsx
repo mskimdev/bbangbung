@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react"
-import { Plus, Search, CalendarDays, MapPin, Users, Phone, ChevronRight, ChevronLeft, CheckCircle2, XCircle, Clock, ShieldOff, Pencil, Trash2, LockKeyhole, Unlock, Flag } from "lucide-react"
+import { Plus, Search, CalendarDays, MapPin, Users, Phone, ChevronRight, ChevronLeft, CheckCircle2, XCircle, Clock, ShieldOff, Pencil, Trash2, LockKeyhole, Unlock, Flag, Play } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
@@ -24,12 +24,13 @@ interface AdminProps {
   onEditSession: (sessionId: string, data: Omit<BbangSession, "id" | "currentParticipants" | "participants" | "status">) => Promise<void>
   onDeleteSession: (sessionId: string) => void
   showToast: (message: string, type?: "success" | "error") => void
+  onAdminSelectSession: (id: string | null) => void
 }
 
 type AdminTab = "sessions" | "members"
 type SessionsView = "list" | "create" | "edit" | "detail"
 
-export function Admin({ sessions, currentUser, onNavigate, onConfirmPayment, onConfirmAll, onCancelParticipant, onPromoteFromWaitlist, onCreateSession, onUpdateSessionStatus, onEditSession, onDeleteSession, showToast }: AdminProps) {
+export function Admin({ sessions, currentUser, onNavigate, onConfirmPayment, onConfirmAll, onCancelParticipant, onPromoteFromWaitlist, onCreateSession, onUpdateSessionStatus, onEditSession, onDeleteSession, showToast, onAdminSelectSession }: AdminProps) {
   const [tab, setTab] = useState<AdminTab>("sessions")
   const [sessionsView, setSessionsView] = useState<SessionsView>("list")
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
@@ -139,7 +140,7 @@ export function Admin({ sessions, currentUser, onNavigate, onConfirmPayment, onC
       {/* 헤더 */}
       {sessionsView === "detail" && selectedSession ? (
         <button
-          onClick={() => { setSessionsView("list"); setSelectedSessionId(null) }}
+          onClick={() => { setSessionsView("list"); setSelectedSessionId(null); onAdminSelectSession(null) }}
           className="-mx-1 flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
         >
           <ChevronLeft className="size-4" />
@@ -159,6 +160,7 @@ export function Admin({ sessions, currentUser, onNavigate, onConfirmPayment, onC
           onUpdateStatus={(status) => onUpdateSessionStatus(selectedSession.id, status)}
           onEdit={() => setSessionsView("edit")}
           onDelete={() => onDeleteSession(selectedSession.id)}
+          onStartPlay={() => onNavigate("session-play", selectedSession.id)}
         />
       ) : (
         <>
@@ -180,7 +182,7 @@ export function Admin({ sessions, currentUser, onNavigate, onConfirmPayment, onC
           {tab === "sessions" && (
             <SessionsAdmin
               sessions={sessions}
-              onSelectSession={(id) => { setSelectedSessionId(id); setSessionsView("detail") }}
+              onSelectSession={(id) => { setSelectedSessionId(id); setSessionsView("detail"); onAdminSelectSession(id) }}
               onCreateSession={() => setSessionsView("create")}
             />
           )}
@@ -206,7 +208,7 @@ export function Admin({ sessions, currentUser, onNavigate, onConfirmPayment, onC
 
 /* ── 정모별 참가비 관리 뷰 ──────────────────────────────── */
 function SessionPaymentManager({
-  session, onConfirm, onConfirmAll, onCancel, onPromote, onUpdateStatus, onEdit, onDelete,
+  session, onConfirm, onConfirmAll, onCancel, onPromote, onUpdateStatus, onEdit, onDelete, onStartPlay,
 }: {
   session: BbangSession
   onConfirm: (memberId: string) => Promise<void>
@@ -216,6 +218,7 @@ function SessionPaymentManager({
   onUpdateStatus: (status: SessionStatus) => Promise<void>
   onEdit: () => void
   onDelete: () => void
+  onStartPlay: () => void
 }) {
   const [cancelTarget, setCancelTarget] = useState<{ memberId: string; name: string } | null>(null)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
@@ -280,6 +283,15 @@ function SessionPaymentManager({
               </Button>
             )}
           </div>
+          {session.status !== "completed" && session.participants.filter(p => p.status === "confirmed").length > 0 && (
+            <Button
+              size="sm"
+              className="mt-2 w-full"
+              onClick={onStartPlay}
+            >
+              <Play className="size-3.5" />정모 진행
+            </Button>
+          )}
           <div className="mt-2 flex gap-2 border-t border-border pt-2">
             <Button size="sm" variant="outline" className="flex-1" onClick={onEdit}>
               <Pencil className="size-3.5" />수정

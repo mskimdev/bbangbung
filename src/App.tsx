@@ -8,6 +8,8 @@ import { MyReservations } from "@/pages/MyReservations"
 import { MyProfile } from "@/pages/MyProfile"
 import { Admin } from "@/pages/Admin"
 import { Onboarding } from "@/pages/Onboarding"
+import { MatchingPage, MatchingPagePreview } from "@/pages/MatchingPage"
+import { SessionPlay } from "@/pages/SessionPlay"
 import { Toast } from "@/components/ui/toast"
 import { useAuth } from "@/hooks/useAuth"
 import { useSessions } from "@/hooks/useSessions"
@@ -19,7 +21,7 @@ import { useSessionSse } from "@/hooks/useSessionSse"
 export default function App() {
   const [showOnboarding, setShowOnboarding] = useState(false)
 
-  const { page, previousPage, selectedSessionId, navigate, resetNavigation } = useNavigation()
+  const { page, previousPage, selectedSessionId, setSelectedSessionId, navigate, resetNavigation } = useNavigation()
   const { toast, showToast, hideToast } = useToast()
 
   const {
@@ -44,7 +46,7 @@ export default function App() {
 
   // SessionDetail이 열려 있을 때만 해당 세션 SSE 구독 (early return 이전에 위치해야 Rules of Hooks 준수)
   useSessionSse(
-    page === "session-detail" ? selectedSessionId : null,
+    (page === "session-detail" || page === "admin") ? selectedSessionId : null,
     (updated) => setSessions((prev) => prev.map((s) => (s.id === updated.id ? updated : s))),
     () => {
       setSessions((prev) => prev.filter((s) => s.id !== selectedSessionId))
@@ -88,7 +90,7 @@ export default function App() {
 
   return (
     <div className="min-h-svh bg-background">
-      <main className="mx-auto max-w-lg px-4 pt-6 pb-20">
+      <main className={page === "session-play" ? "px-4 pt-6 pb-20 md:px-6" : "mx-auto max-w-lg px-4 pt-6 pb-20"}>
         {page === "home" && (
           <Home currentUser={currentUser} sessions={sessions} reservations={reservations} onNavigate={navigate} />
         )}
@@ -111,6 +113,15 @@ export default function App() {
             onToast={showToast}
           />
         )}
+        {page === "session-match" && selectedSession && (
+          <MatchingPage session={selectedSession} currentUserId={currentUser.id} onNavigate={navigate} />
+        )}
+        {page === "session-match" && !selectedSession && (
+          <MatchingPagePreview />
+        )}
+        {page === "session-play" && selectedSession && (
+          <SessionPlay session={selectedSession} onNavigate={navigate} />
+        )}
         {page === "my-reservations" && (
           <MyReservations reservations={reservations} onNavigate={navigate} onCancel={handleCancel} />
         )}
@@ -126,8 +137,9 @@ export default function App() {
             onCreateSession={handleCreateSession}
             onUpdateSessionStatus={handleUpdateSessionStatus}
             onEditSession={handleEditSession}
-            onDeleteSession={(sessionId) => { handleDeleteSession(sessionId); navigate("admin") }}
+            onDeleteSession={(sessionId) => { handleDeleteSession(sessionId); setSelectedSessionId(null); navigate("admin") }}
             showToast={showToast}
+            onAdminSelectSession={setSelectedSessionId}
           />
         )}
       </main>

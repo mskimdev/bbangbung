@@ -19,5 +19,5 @@ export function useNavigation(initialPage: Page = "home") {
     setSelectedSessionId(null)
   }
 
-  return { page, previousPage, selectedSessionId, navigate, resetNavigation }
+  return { page, previousPage, selectedSessionId, setSelectedSessionId, navigate, resetNavigation }
 }

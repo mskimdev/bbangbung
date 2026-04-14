@@ -1,4 +1,4 @@
-import { CalendarDays, MapPin, Clock, ChevronRight, AlertCircle, X } from "lucide-react"
+import { CalendarDays, MapPin, Clock, ChevronRight, AlertCircle, X, Radio } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
@@ -39,12 +39,26 @@ export function Home({ currentUser, sessions, reservations, onNavigate }: HomePr
     .sort((a, b) => a.date.localeCompare(b.date))
     .slice(0, 3)
 
+  // 오늘 confirmed 예약 (진행 중 섹션에만 표시)
+  const liveReservation = reservations.find((r) => r.date === todayStr && r.status === "confirmed")
+  const liveSession =
+    liveReservation
+      ? (sessions.find((s) => s.id === liveReservation.sessionId) ?? null)
+      : currentUser.isAdmin
+        ? (sessions.find((s) => s.date === todayStr && s.status !== "completed") ?? null)
+        : null
+
+  // 내 예정 모임 — 오늘 confirmed는 제외
   const activeReservations = reservations
-    .filter((r) => (r.status === "confirmed" || r.status === "pending" || r.status === "waitlisted") && r.date >= todayStr)
+    .filter((r) =>
+      (r.status === "confirmed" || r.status === "pending" || r.status === "waitlisted") &&
+      r.date >= todayStr &&
+      !(r.date === todayStr && r.status === "confirmed"),
+    )
     .sort((a, b) => a.date.localeCompare(b.date))
 
   const pendingCount = activeReservations.filter((r) => r.status === "pending").length
-  const confirmedCount = activeReservations.filter((r) => r.status === "confirmed").length
+  const confirmedCount = reservations.filter((r) => r.status === "confirmed" && r.date >= todayStr).length
 
   return (
     <div className="flex flex-col gap-6 pb-4">
@@ -75,6 +89,38 @@ export function Home({ currentUser, sessions, reservations, onNavigate }: HomePr
           {pendingCount > 0 && <span className="text-yellow-200">· 입금 대기 {pendingCount}건</span>}
         </div>
       </div>
+
+      {/* 현재 진행 중 */}
+      {liveSession && (
+        <section>
+          <div className="mb-3 flex items-center gap-2">
+            <Radio className="size-4 text-primary" />
+            <h2 className="font-semibold text-primary">현재 진행 중</h2>
+          </div>
+          <div className="rounded-xl border border-primary/40 bg-primary/5 p-4 dark:border-primary/30 dark:bg-primary/10">
+            <p className="font-semibold">{liveSession.title}</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {formatDate(liveSession.date)} · {formatTime(liveSession.startTime)}~{formatTime(liveSession.endTime)}
+            </p>
+            <p className="text-sm text-muted-foreground">{liveSession.location}</p>
+            {currentUser.isAdmin ? (
+              <Button
+                className="mt-3 w-full"
+                onClick={() => onNavigate("session-play", liveSession.id)}
+              >
+                정모 진행 (관리자)
+              </Button>
+            ) : (
+              <Button
+                className="mt-3 w-full"
+                onClick={() => onNavigate("session-match", liveSession.id)}
+              >
+                실시간 코트 현황 보기
+              </Button>
+            )}
+          </div>
+        </section>
+      )}
 
       {/* 입금 대기 알림 */}
       {pendingCount > 0 && !dismissedPendingBanner && (
