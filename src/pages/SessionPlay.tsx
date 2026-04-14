@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { LEVEL_COLORS, formatDate } from "@/lib/badminton"
 import { courtsApi } from "@/lib/api"
-import type { BbangSession, Page, SessionParticipant } from "@/types"
+import type { BadmintonLevel, BbangSession, Page, SessionParticipant } from "@/types"
 
 // ─── 타입 ────────────────────────────────────────────────────────────────────
 
@@ -92,6 +92,46 @@ function pickGroup(
     return [...males.slice(0, 2), ...females.slice(0, 2)]
   }
   return pickNextFour(currentQueue, history)
+}
+
+// ─── 팀 밸런싱 ───────────────────────────────────────────────────────────────
+
+const LEVEL_SCORES: Record<BadmintonLevel, number> = { S: 5, A: 4, B: 3, C: 2, D: 1 }
+
+function balanceTeams(players: SessionParticipant[]): SessionParticipant[] {
+  if (players.length !== 4) return players
+  const s = (p: SessionParticipant) => LEVEL_SCORES[p.level]
+
+  const males   = players.filter((p) => p.gender === "male")
+  const females = players.filter((p) => p.gender === "female")
+
+  // 2남2여인 경우: 성비 균형(각 팀 1남1여) 우선, 그 다음 레벨 균형
+  if (males.length === 2 && females.length === 2) {
+    const [m1, m2] = males
+    const [f1, f2] = females
+    const diff1 = Math.abs((s(m1) + s(f1)) - (s(m2) + s(f2)))
+    const diff2 = Math.abs((s(m1) + s(f2)) - (s(m2) + s(f1)))
+    return diff1 <= diff2
+      ? [m1, f1, m2, f2]  // {m1,f1} vs {m2,f2}
+      : [m1, f2, m2, f1]  // {m1,f2} vs {m2,f1}
+  }
+
+  // 그 외(남복/여복 등): 레벨 균형만
+  const splits: [number, number, number, number][] = [
+    [0, 1, 2, 3],
+    [0, 2, 1, 3],
+    [0, 3, 1, 2],
+  ]
+  let best = splits[0]
+  let bestDiff = Infinity
+  for (const combo of splits) {
+    const diff = Math.abs(
+      (s(players[combo[0]]) + s(players[combo[1]])) -
+      (s(players[combo[2]]) + s(players[combo[3]])),
+    )
+    if (diff < bestDiff) { bestDiff = diff; best = combo }
+  }
+  return [players[best[0]], players[best[1]], players[best[2]], players[best[3]]]
 }
 
 // ─── 메인 컴포넌트 ────────────────────────────────────────────────────────────
@@ -239,7 +279,7 @@ export function SessionPlay({ session, onNavigate }: SessionPlayProps) {
       const four = pickGroup(returnedQueue, newHistory, "free")
       if (four) {
         newCourts = newCourts.map((c, i) =>
-          i === courtIndex ? { ...c, players: four as (SessionParticipant | null)[] } : c,
+          i === courtIndex ? { ...c, players: balanceTeams(four) as (SessionParticipant | null)[] } : c,
         )
         const usedIds = new Set(four.map((p) => p.memberId))
         newQueue = returnedQueue.filter((p) => !usedIds.has(p.memberId))
@@ -287,7 +327,8 @@ export function SessionPlay({ session, onNavigate }: SessionPlayProps) {
     if (courtIndex === -1) return
 
     const newCourts = courts.map((c) => ({ ...c, players: [...c.players] }))
-    newCourts[courtIndex].players = [...game.players] as (SessionParticipant | null)[]
+    const gamePlayers = game.players.filter(Boolean) as SessionParticipant[]
+    newCourts[courtIndex].players = balanceTeams(gamePlayers) as (SessionParticipant | null)[]
     const newPending = pendingGames.filter((g) => g.id !== gameId)
     setCourts(newCourts)
     setPendingGames(newPending)
@@ -373,7 +414,7 @@ export function SessionPlay({ session, onNavigate }: SessionPlayProps) {
       if (emptyCount === 4) {
         const four = pickGroup(currentQueue, currentHistory, type)
         if (!four) continue
-        court.players = four as (SessionParticipant | null)[]
+        court.players = balanceTeams(four) as (SessionParticipant | null)[]
         const usedIds = new Set(four.map((p) => p.memberId))
         currentQueue  = currentQueue.filter((p) => !usedIds.has(p.memberId))
       } else {
@@ -408,7 +449,7 @@ export function SessionPlay({ session, onNavigate }: SessionPlayProps) {
     const four = pickGroup(queue, history, type)
     if (!four) return
     const newCourts = courts.map((c, i) =>
-      i === courtIndex ? { ...c, players: four as (SessionParticipant | null)[] } : c,
+      i === courtIndex ? { ...c, players: balanceTeams(four) as (SessionParticipant | null)[] } : c,
     )
     const usedIds = new Set(four.map((p) => p.memberId))
     setCourts(newCourts)
