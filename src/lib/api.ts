@@ -14,6 +14,13 @@ api.interceptors.request.use((config) => {
   return config
 })
 
+export const courtsApi = {
+  get:    (sessionId: string) =>
+    api.get<import("@/types").CourtSlotApi[]>(`/sessions/${sessionId}/courts`),
+  update: (sessionId: string, courts: import("@/types").CourtSlotApi[]) =>
+    api.put<import("@/types").CourtSlotApi[]>(`/sessions/${sessionId}/courts`, courts),
+}
+
 export function getErrorMessage(error: unknown): string {
   if (error && typeof error === "object" && "response" in error) {
     const res = (error as any).response
