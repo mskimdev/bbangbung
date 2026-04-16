@@ -44,17 +44,30 @@ export default function App() {
   const { reservations, handleReserve, handleWaitlist, handleCancel } =
     useReservations(currentUser, refreshSession, showToast, refreshCurrentUser)
 
-  // SessionDetail이 열려 있을 때만 해당 세션 SSE 구독 (early return 이전에 위치해야 Rules of Hooks 준수)
+  // home 페이지에서 오늘 세션 실시간 구독 (in_progress 배너 즉시 반영)
+  const todayStr = new Date().toLocaleDateString("sv")
+  const todaySessionId =
+    page === "home"
+      ? (sessions.find((s) => s.date === todayStr && s.status !== "completed" && s.status !== "cancelled")?.id ?? null)
+      : null
+
+  const sseSessionId =
+    page === "session-detail" || page === "admin" ? selectedSessionId :
+    page === "home" ? todaySessionId :
+    null
+
   useSessionSse(
-    (page === "session-detail" || page === "admin") ? selectedSessionId : null,
+    sseSessionId,
     (updated) => setSessions((prev) => prev.map((s) => (s.id === updated.id ? updated : s))),
     () => {
-      setSessions((prev) => prev.filter((s) => s.id !== selectedSessionId))
-      navigate("sessions")
-      showToast("삭제된 정모입니다.", "error")
+      setSessions((prev) => prev.filter((s) => s.id !== sseSessionId))
+      if (page !== "home") {
+        navigate("sessions")
+        showToast("삭제된 정모입니다.", "error")
+      }
     },
     () => {
-      if (selectedSessionId) refreshSession(selectedSessionId)
+      if (sseSessionId) refreshSession(sseSessionId)
     },
   )
 

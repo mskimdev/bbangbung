@@ -23,7 +23,11 @@ export function SessionList({ sessions, onNavigate }: SessionListProps) {
   const [filter, setFilter] = useState<FilterTab>("open")
 
   const filtered = sessions
-    .filter((s) => filter === "all" || s.status === filter)
+    .filter((s) => {
+      if (filter === "all") return true
+      if (filter === "closed") return s.status === "closed" || s.status === "in_progress"
+      return s.status === filter
+    })
     .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
 
   return (
@@ -64,7 +68,7 @@ export function SessionList({ sessions, onNavigate }: SessionListProps) {
               <p className="text-sm font-medium">
                 {filter === "all" ? "아직 정모가 없습니다" :
                  filter === "open" ? "모집 중인 정모가 없습니다" :
-                 filter === "closed" ? "마감된 정모가 없습니다" :
+                 filter === "closed" ? "마감/진행 중인 정모가 없습니다" :
                  "완료된 정모가 없습니다"}
               </p>
               {filter === "open" && (
