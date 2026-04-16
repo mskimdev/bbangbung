@@ -16,6 +16,7 @@ interface AdminProps {
   currentUser: Member
   onNavigate: (page: Page, sessionId?: string) => void
   onConfirmPayment: (sessionId: string, memberId: string) => Promise<void>
+  onUnconfirmPayment: (sessionId: string, memberId: string) => Promise<void>
   onConfirmAll: (sessionId: string) => Promise<void>
   onCancelParticipant: (sessionId: string, memberId: string) => Promise<void>
   onPromoteFromWaitlist: (sessionId: string, memberId: string) => Promise<void>
@@ -30,7 +31,7 @@ interface AdminProps {
 type AdminTab = "sessions" | "members"
 type SessionsView = "list" | "create" | "edit" | "detail"
 
-export function Admin({ sessions, currentUser, onNavigate, onConfirmPayment, onConfirmAll, onCancelParticipant, onPromoteFromWaitlist, onCreateSession, onUpdateSessionStatus, onEditSession, onDeleteSession, showToast, onAdminSelectSession }: AdminProps) {
+export function Admin({ sessions, currentUser, onNavigate, onConfirmPayment, onUnconfirmPayment, onConfirmAll, onCancelParticipant, onPromoteFromWaitlist, onCreateSession, onUpdateSessionStatus, onEditSession, onDeleteSession, showToast, onAdminSelectSession }: AdminProps) {
   const [tab, setTab] = useState<AdminTab>("sessions")
   const [sessionsView, setSessionsView] = useState<SessionsView>("list")
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
@@ -154,6 +155,7 @@ export function Admin({ sessions, currentUser, onNavigate, onConfirmPayment, onC
         <SessionPaymentManager
           session={selectedSession}
           onConfirm={(memberId) => onConfirmPayment(selectedSession.id, memberId)}
+          onUnconfirm={(memberId) => onUnconfirmPayment(selectedSession.id, memberId)}
           onConfirmAll={() => onConfirmAll(selectedSession.id)}
           onCancel={(memberId) => onCancelParticipant(selectedSession.id, memberId)}
           onPromote={(memberId) => onPromoteFromWaitlist(selectedSession.id, memberId)}
@@ -208,10 +210,11 @@ export function Admin({ sessions, currentUser, onNavigate, onConfirmPayment, onC
 
 /* ── 정모별 참가비 관리 뷰 ──────────────────────────────── */
 function SessionPaymentManager({
-  session, onConfirm, onConfirmAll, onCancel, onPromote, onUpdateStatus, onEdit, onDelete, onStartPlay,
+  session, onConfirm, onUnconfirm, onConfirmAll, onCancel, onPromote, onUpdateStatus, onEdit, onDelete, onStartPlay,
 }: {
   session: BbangSession
   onConfirm: (memberId: string) => Promise<void>
+  onUnconfirm: (memberId: string) => Promise<void>
   onConfirmAll: () => Promise<void>
   onCancel: (memberId: string) => Promise<void>
   onPromote: (memberId: string) => Promise<void>
@@ -407,14 +410,28 @@ function SessionPaymentManager({
                 </div>
                 <span className="text-xs text-muted-foreground">확정일: {p.reservedAt}</span>
               </div>
-              <Button
-                size="sm"
-                variant="destructive"
-                disabled={loadingId === p.memberId}
-                onClick={() => setCancelTarget({ memberId: p.memberId, name: p.memberName })}
-              >
-                <XCircle className="size-3.5" />취소
-              </Button>
+              <div className="flex gap-1.5">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={loadingId === p.memberId}
+                  onClick={async () => {
+                    setLoadingId(p.memberId)
+                    await onUnconfirm(p.memberId)
+                    setLoadingId(null)
+                  }}
+                >
+                  입금 취소
+                </Button>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  disabled={loadingId === p.memberId}
+                  onClick={() => setCancelTarget({ memberId: p.memberId, name: p.memberName })}
+                >
+                  <XCircle className="size-3.5" />취소
+                </Button>
+              </div>
             </div>
           ))}
           {confirmed.length === 0 && (

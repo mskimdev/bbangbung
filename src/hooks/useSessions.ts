@@ -143,6 +143,16 @@ export function useSessions(showToast: ShowToast) {
     }
   }
 
+  async function handleUnconfirmPayment(sessionId: string, memberId: string) {
+    try {
+      await api.patch("/reservations/unconfirm", { memberId, sessionId })
+      await refreshSession(sessionId)
+      showToast("확정이 취소되었습니다.")
+    } catch (e) {
+      showToast(getErrorMessage(e), "error")
+    }
+  }
+
   async function handleConfirmAll(sessionId: string) {
     try {
       await api.patch(`/reservations/confirm-all?sessionId=${sessionId}`)
@@ -183,6 +193,7 @@ export function useSessions(showToast: ShowToast) {
     handleDeleteSession,
     handleUpdateSessionStatus,
     handleConfirmPayment,
+    handleUnconfirmPayment,
     handleConfirmAll,
     handlePromoteFromWaitlist,
     handleCancelParticipant,

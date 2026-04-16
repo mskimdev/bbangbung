@@ -33,6 +33,7 @@ export default function App() {
     refreshSession,
     handleCreateSession,
     handleConfirmPayment,
+    handleUnconfirmPayment,
     handleConfirmAll,
     handlePromoteFromWaitlist,
     handleCancelParticipant,
@@ -159,6 +160,7 @@ export default function App() {
             currentUser={currentUser}
             onNavigate={navigate}
             onConfirmPayment={handleConfirmPayment}
+            onUnconfirmPayment={handleUnconfirmPayment}
             onConfirmAll={handleConfirmAll}
             onCancelParticipant={handleCancelParticipant}
             onPromoteFromWaitlist={handlePromoteFromWaitlist}
