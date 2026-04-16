@@ -215,7 +215,7 @@ function SessionPaymentManager({
   onConfirmAll: () => Promise<void>
   onCancel: (memberId: string) => Promise<void>
   onPromote: (memberId: string) => Promise<void>
-  onUpdateStatus: (status: SessionStatus) => Promise<void>
+  onUpdateStatus: (status: SessionStatus) => Promise<boolean>
   onEdit: () => void
   onDelete: () => void
   onStartPlay: () => void
