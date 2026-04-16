@@ -20,7 +20,7 @@ interface AdminProps {
   onCancelParticipant: (sessionId: string, memberId: string) => Promise<void>
   onPromoteFromWaitlist: (sessionId: string, memberId: string) => Promise<void>
   onCreateSession: (session: Omit<BbangSession, "id" | "currentParticipants" | "participants" | "status">, organizerId: string) => Promise<void>
-  onUpdateSessionStatus: (sessionId: string, status: SessionStatus) => Promise<void>
+  onUpdateSessionStatus: (sessionId: string, status: SessionStatus) => Promise<boolean>
   onEditSession: (sessionId: string, data: Omit<BbangSession, "id" | "currentParticipants" | "participants" | "status">) => Promise<void>
   onDeleteSession: (sessionId: string) => void
   showToast: (message: string, type?: "success" | "error") => void
