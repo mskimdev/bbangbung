@@ -21,6 +21,13 @@ export const courtsApi = {
     api.put<import("@/types").CourtSlotApi[]>(`/sessions/${sessionId}/courts`, courts),
 }
 
+export const playStatusApi = {
+  get: (sessionId: string) =>
+    api.get<Record<string, string>>(`/sessions/${sessionId}/play-status`),
+  set: (sessionId: string, memberId: string, status: string) =>
+    api.patch(`/sessions/${sessionId}/participants/${memberId}/play-status`, { status }),
+}
+
 export function getErrorMessage(error: unknown): string {
   if (error && typeof error === "object" && "response" in error) {
     const res = (error as any).response

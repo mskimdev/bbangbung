@@ -2,8 +2,8 @@ import { useState, useEffect } from "react"
 import { ChevronLeft } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { LEVEL_COLORS, formatDate, formatTime } from "@/lib/badminton"
-import { courtsApi } from "@/lib/api"
-import type { BbangSession, CourtSlotApi, Page, SessionParticipant } from "@/types"
+import { courtsApi, playStatusApi } from "@/lib/api"
+import type { BbangSession, CourtSlotApi, Page, PlayStatus, PlayStatusMap, SessionParticipant } from "@/types"
 
 const BASE_URL = (import.meta.env.VITE_API_URL ?? "http://localhost:8080") + "/api"
 
@@ -18,10 +18,28 @@ export function MatchingPage({ session, currentUserId, onNavigate }: MatchingPag
   const byId      = Object.fromEntries(confirmed.map((p) => [p.memberId, p]))
 
   const [courts, setCourts] = useState<CourtSlotApi[]>([])
+  const [playStatuses, setPlayStatuses] = useState<PlayStatusMap>({})
+  const [statusLoading, setStatusLoading] = useState(false)
+
+  const myStatus: PlayStatus = playStatuses[currentUserId] ?? "active"
+
+  async function handleSetStatus(status: PlayStatus) {
+    if (status === myStatus) return
+    setStatusLoading(true)
+    try {
+      await playStatusApi.set(session.id, currentUserId, status)
+      setPlayStatuses((prev) => ({ ...prev, [currentUserId]: status }))
+    } catch {
+      // 실패 시 무시 (SSE로 곧 동기화됨)
+    } finally {
+      setStatusLoading(false)
+    }
+  }
 
   // 초기 로드 + SSE 구독
   useEffect(() => {
     courtsApi.get(session.id).then((res) => setCourts(res.data)).catch(() => {})
+    playStatusApi.get(session.id).then((res) => setPlayStatuses(res.data as PlayStatusMap)).catch(() => {})
 
     const token = localStorage.getItem("token")
     if (!token) return
@@ -36,6 +54,11 @@ export function MatchingPage({ session, currentUserId, onNavigate }: MatchingPag
       es.addEventListener("court-update", (e) => {
         try {
           setCourts(JSON.parse(e.data) as CourtSlotApi[])
+        } catch {}
+      })
+      es.addEventListener("play-status-update", (e) => {
+        try {
+          setPlayStatuses(JSON.parse(e.data) as PlayStatusMap)
         } catch {}
       })
       es.onerror = () => {
@@ -94,6 +117,42 @@ export function MatchingPage({ session, currentUserId, onNavigate }: MatchingPag
             <span className="font-bold text-sm">{value}</span>
           </div>
         ))}
+      </div>
+
+      {/* 내 상태 */}
+      <div className="rounded-xl border border-border bg-card p-4">
+        <h2 className="mb-3 text-sm font-semibold">내 상태</h2>
+        <div className="flex gap-2">
+          {(["active", "resting", "done"] as PlayStatus[]).map((s) => (
+            <button
+              key={s}
+              disabled={statusLoading}
+              onClick={() => handleSetStatus(s)}
+              className={cn(
+                "flex-1 rounded-xl border py-2.5 text-sm font-medium transition-colors",
+                myStatus === s
+                  ? s === "active"
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : s === "resting"
+                      ? "border-amber-400 bg-amber-50 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
+                      : "border-border bg-muted text-foreground"
+                  : "border-border text-muted-foreground hover:border-foreground/40",
+              )}
+            >
+              {{ active: "활성", resting: "휴식", done: "종료" }[s]}
+            </button>
+          ))}
+        </div>
+        {myStatus === "resting" && (
+          <p className="mt-2 text-center text-xs text-amber-600 dark:text-amber-400">
+            휴식 중 — 진행자가 코트 배정에서 제외합니다
+          </p>
+        )}
+        {myStatus === "done" && (
+          <p className="mt-2 text-center text-xs text-muted-foreground">
+            종료 — 오늘 정모 수고하셨습니다!
+          </p>
+        )}
       </div>
 
       {/* 코트 현황 */}
@@ -164,7 +223,13 @@ export function MatchingPage({ session, currentUserId, onNavigate }: MatchingPag
         ) : (
           <div className="flex flex-wrap gap-2">
             {queue.map((p, i) => (
-              <QueueChip key={p.memberId} player={p} position={i + 1} isMe={p.memberId === currentUserId} />
+              <QueueChip
+                key={p.memberId}
+                player={p}
+                position={i + 1}
+                isMe={p.memberId === currentUserId}
+                playStatus={playStatuses[p.memberId] ?? "active"}
+              />
             ))}
           </div>
         )}
@@ -251,23 +316,39 @@ function PlayerChip({ player, isMe }: { player: SessionParticipant; isMe: boolea
   )
 }
 
-function QueueChip({ player, position, isMe }: { player: SessionParticipant; position: number; isMe: boolean }) {
-  const isMale = player.gender === "male"
+function QueueChip({
+  player,
+  position,
+  isMe,
+  playStatus = "active",
+}: {
+  player: SessionParticipant
+  position: number
+  isMe: boolean
+  playStatus?: PlayStatus
+}) {
+  const isMale    = player.gender === "male"
+  const isResting = playStatus === "resting"
+  const isDone    = playStatus === "done"
   return (
     <div className={cn(
       "flex items-center gap-1.5 rounded-full border px-3 py-1",
+      isDone    ? "border-border bg-muted opacity-50" :
+      isResting ? "border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-900/20" :
       isMe
         ? "border-primary bg-primary/10 ring-1 ring-primary dark:bg-primary/20"
         : isMale
           ? "border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-900/20"
           : "border-pink-200 bg-pink-50 dark:border-pink-800 dark:bg-pink-900/20",
     )}>
-      <span className={cn("text-xs", isMe ? "font-bold text-primary" : "text-muted-foreground")}>{position}</span>
+      <span className={cn("text-xs", isMe && !isResting && !isDone ? "font-bold text-primary" : "text-muted-foreground")}>{position}</span>
       <span className={cn("size-5 rounded-full text-center text-xs font-bold leading-5", LEVEL_COLORS[player.level])}>
         {player.level}
       </span>
       <span className={cn("text-sm", isMe && "font-semibold")}>{player.memberName}</span>
-      {isMe && <span className="text-xs font-bold text-primary">나</span>}
+      {isResting && <span className="text-xs font-medium text-amber-600 dark:text-amber-400">휴식</span>}
+      {isDone    && <span className="text-xs text-muted-foreground">종료</span>}
+      {isMe && !isResting && !isDone && <span className="text-xs font-bold text-primary">나</span>}
     </div>
   )
 }

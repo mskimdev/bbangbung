@@ -1,4 +1,6 @@
-import { useState } from "react"
+import { useState, useEffect } from "react"
+import type { PlayStatusMap } from "@/types"
+import { playStatusApi } from "@/lib/api"
 import { Navbar } from "@/components/layout/Navbar"
 import { Auth } from "@/pages/Auth"
 import { Home } from "@/pages/Home"
@@ -20,6 +22,7 @@ import { useSessionSse } from "@/hooks/useSessionSse"
 
 export default function App() {
   const [showOnboarding, setShowOnboarding] = useState(false)
+  const [playStatuses, setPlayStatuses] = useState<PlayStatusMap>({})
 
   const { page, previousPage, selectedSessionId, setSelectedSessionId, navigate, resetNavigation } = useNavigation()
   const { toast, showToast, hideToast } = useToast()
@@ -52,9 +55,20 @@ export default function App() {
       : null
 
   const sseSessionId =
-    page === "session-detail" || page === "admin" ? selectedSessionId :
+    page === "session-detail" || page === "admin" || page === "session-play" ? selectedSessionId :
     page === "home" ? todaySessionId :
     null
+
+  // session-play 진입 시 현재 play status 초기 로드 (SSE는 변경 시에만 발화)
+  useEffect(() => {
+    if (page === "session-play" && selectedSessionId) {
+      playStatusApi.get(selectedSessionId)
+        .then((res) => setPlayStatuses(res.data as PlayStatusMap))
+        .catch(() => {})
+    } else if (page !== "session-play") {
+      setPlayStatuses({})
+    }
+  }, [page, selectedSessionId])
 
   useSessionSse(
     sseSessionId,
@@ -69,6 +83,7 @@ export default function App() {
     () => {
       if (sseSessionId) refreshSession(sseSessionId)
     },
+    setPlayStatuses,
   )
 
   async function handleLogoutAndReset() {
@@ -133,7 +148,7 @@ export default function App() {
           <MatchingPagePreview />
         )}
         {page === "session-play" && selectedSession && (
-          <SessionPlay session={selectedSession} onNavigate={navigate} />
+          <SessionPlay session={selectedSession} playStatuses={playStatuses} onNavigate={navigate} />
         )}
         {page === "my-reservations" && (
           <MyReservations reservations={reservations} onNavigate={navigate} onCancel={handleCancel} />

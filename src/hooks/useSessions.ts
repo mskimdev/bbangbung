@@ -119,15 +119,17 @@ export function useSessions(showToast: ShowToast) {
     }
   }
 
-  async function handleUpdateSessionStatus(sessionId: string, status: SessionStatus) {
+  async function handleUpdateSessionStatus(sessionId: string, status: SessionStatus): Promise<boolean> {
     const prev = sessions.find((s) => s.id === sessionId)
     setSessions((cur) => cur.map((s) => (s.id === sessionId ? { ...s, status } : s)))
     try {
       await api.patch(`/sessions/${sessionId}/status`, { status })
       showToast("세션 상태가 변경되었습니다.")
+      return true
     } catch (e) {
       if (prev) setSessions((cur) => cur.map((s) => (s.id === sessionId ? prev : s)))
       showToast(getErrorMessage(e), "error")
+      return false
     }
   }
 

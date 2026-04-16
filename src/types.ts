@@ -3,6 +3,8 @@ export type Gender = "male" | "female"
 export type SessionStatus = "open" | "closed" | "in_progress" | "completed" | "cancelled"
 export type ReservationStatus = "confirmed" | "pending" | "waitlisted" | "cancelled"
 export type Page = "home" | "sessions" | "session-detail" | "session-match" | "session-play" | "my-reservations" | "profile" | "admin"
+export type PlayStatus = "active" | "resting" | "done"
+export type PlayStatusMap = Record<string, PlayStatus>
 
 export interface Member {
   id: string

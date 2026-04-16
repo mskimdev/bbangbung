@@ -290,9 +290,9 @@ function SessionPaymentManager({
               disabled={loadingId === "status"}
               onClick={async () => {
                 setLoadingId("status")
-                await onUpdateStatus("in_progress")
+                const ok = await onUpdateStatus("in_progress")
                 setLoadingId(null)
-                onStartPlay()
+                if (ok) onStartPlay()
               }}
             >
               <Play className="size-3.5" />{loadingId === "status" ? "시작 중..." : "정모 시작"}
@@ -407,7 +407,14 @@ function SessionPaymentManager({
                 </div>
                 <span className="text-xs text-muted-foreground">확정일: {p.reservedAt}</span>
               </div>
-              <Badge variant="success">확정</Badge>
+              <Button
+                size="sm"
+                variant="destructive"
+                disabled={loadingId === p.memberId}
+                onClick={() => setCancelTarget({ memberId: p.memberId, name: p.memberName })}
+              >
+                <XCircle className="size-3.5" />취소
+              </Button>
             </div>
           ))}
           {confirmed.length === 0 && (

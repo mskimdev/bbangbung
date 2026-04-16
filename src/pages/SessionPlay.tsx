@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { LEVEL_COLORS, formatDate } from "@/lib/badminton"
 import { courtsApi } from "@/lib/api"
-import type { BadmintonLevel, BbangSession, Gender, Page, SessionParticipant } from "@/types"
+import type { BadmintonLevel, BbangSession, Gender, Page, PlayStatusMap, SessionParticipant } from "@/types"
 
 // ─── 타입 ────────────────────────────────────────────────────────────────────
 
@@ -142,10 +142,11 @@ function isGuest(player: SessionParticipant) {
 
 interface SessionPlayProps {
   session: BbangSession
+  playStatuses?: PlayStatusMap
   onNavigate: (page: Page) => void
 }
 
-export function SessionPlay({ session, onNavigate }: SessionPlayProps) {
+export function SessionPlay({ session, playStatuses = {}, onNavigate }: SessionPlayProps) {
   const confirmed = session.participants.filter((p) => p.status === "confirmed")
 
   const [courts, setCourts]             = useState<CourtState[]>(() =>
@@ -216,12 +217,20 @@ export function SessionPlay({ session, onNavigate }: SessionPlayProps) {
     courtsApi.update(session.id, [...courtPayload, ...pendingPayload]).catch(() => {})
   }
 
+  // 휴식/종료 참가자는 자동 배정에서 제외
+  function isActivePlayer(player: SessionParticipant): boolean {
+    if (isGuest(player)) return true
+    const s = playStatuses[player.memberId]
+    return !s || s === "active"
+  }
+  const activeQueue = queue.filter(isActivePlayer)
+
   const playingCount   = courts.filter((c) => c.status === "playing").reduce((s, c) => s + getCourtPlayers(c).length, 0)
   const totalGameCount = history.length
-  const maleCount      = queue.filter((p) => p.gender === "male").length
-  const femaleCount    = queue.filter((p) => p.gender === "female").length
+  const maleCount      = activeQueue.filter((p) => p.gender === "male").length
+  const femaleCount    = activeQueue.filter((p) => p.gender === "female").length
 
-  const canAutoAssign  = queue.length >= 4
+  const canAutoAssign  = activeQueue.length >= 4
 
   const hasIdleCourt   = courts.some((c) => c.status === "idle" && getCourtPlayers(c).length === 0)
 
@@ -229,7 +238,7 @@ export function SessionPlay({ session, onNavigate }: SessionPlayProps) {
     if (type === "male")   return maleCount >= 4
     if (type === "female") return femaleCount >= 4
     if (type === "mixed")  return maleCount >= 2 && femaleCount >= 2
-    return queue.length >= 4
+    return activeQueue.length >= 4
   }
 
   // ── 코트 슬롯 ──────────────────────────────────────────────────────────────
@@ -281,7 +290,8 @@ export function SessionPlay({ session, onNavigate }: SessionPlayProps) {
     let newQueue = returnedQueue
 
     if (autoMode) {
-      const four = pickGroup(returnedQueue, newHistory, "free")
+      const returnedActiveQueue = returnedQueue.filter(isActivePlayer)
+      const four = pickGroup(returnedActiveQueue, newHistory, "free")
       if (four) {
         newCourts = newCourts.map((c, i) =>
           i === courtIndex ? { ...c, players: balanceTeams(four) as (SessionParticipant | null)[] } : c,
@@ -352,7 +362,7 @@ export function SessionPlay({ session, onNavigate }: SessionPlayProps) {
   function handleAssignPendingManual(gameId: string, type: MatchType) {
     const game = pendingGames.find((g) => g.id === gameId)
     if (!game || getPendingPlayers(game).length > 0) return
-    const four = pickGroup(queue, history, type)
+    const four = pickGroup(activeQueue, history, type)
     if (!four) return
     const usedIds = new Set(four.map((p) => p.memberId))
     const newPending = pendingGames.map((g) =>
@@ -420,7 +430,7 @@ export function SessionPlay({ session, onNavigate }: SessionPlayProps) {
   // ── 자동 배정 (전체) ────────────────────────────────────────────────────────
 
   function handleAutoAssign(type: MatchType = "free") {
-    let currentQueue     = [...queue]
+    let currentQueue     = [...activeQueue]
     const newCourts      = courts.map((c) => ({ ...c, players: [...c.players] }))
     const newPending     = [...pendingGames]
     const currentHistory = [...history]
@@ -456,9 +466,11 @@ export function SessionPlay({ session, onNavigate }: SessionPlayProps) {
       currentQueue  = currentQueue.filter((p) => !usedIds.has(p.memberId))
     }
 
+    // 휴식/종료 인원은 배정하지 않고 queue에 유지
+    const inactiveInQueue = queue.filter((p) => !isActivePlayer(p))
     setCourts(newCourts)
     setPendingGames(newPending)
-    setQueue(currentQueue)
+    setQueue([...currentQueue, ...inactiveInQueue])
     saveCourts(newCourts, newPending)
   }
 
@@ -467,7 +479,7 @@ export function SessionPlay({ session, onNavigate }: SessionPlayProps) {
   function handleAssignCourt(courtIndex: number, type: MatchType) {
     const court = courts[courtIndex]
     if (court.status === "playing" || getCourtPlayers(court).length > 0) return
-    const four = pickGroup(queue, history, type)
+    const four = pickGroup(activeQueue, history, type)
     if (!four) return
     const newCourts = courts.map((c, i) =>
       i === courtIndex ? { ...c, players: balanceTeams(four) as (SessionParticipant | null)[] } : c,
@@ -664,7 +676,12 @@ export function SessionPlay({ session, onNavigate }: SessionPlayProps) {
             ) : (
               <div className="flex flex-wrap gap-2">
                 {queue.map((p, i) => (
-                  <QueueChip key={p.memberId} player={p} position={i + 1} />
+                  <QueueChip
+                    key={p.memberId}
+                    player={p}
+                    position={i + 1}
+                    playStatus={isGuest(p) ? "active" : (playStatuses[p.memberId] ?? "active")}
+                  />
                 ))}
               </div>
             )}
@@ -693,6 +710,7 @@ export function SessionPlay({ session, onNavigate }: SessionPlayProps) {
         <PlayerPicker
           title={pickerTitle}
           queue={queue}
+          playStatuses={playStatuses}
           onPick={handlePickPlayer}
           onClose={() => setActiveSlot(null)}
         />
@@ -961,12 +979,24 @@ function PlayerSlot({
   )
 }
 
-function QueueChip({ player, position }: { player: SessionParticipant; position: number }) {
-  const isMale = player.gender === "male"
+function QueueChip({
+  player,
+  position,
+  playStatus = "active",
+}: {
+  player: SessionParticipant
+  position: number
+  playStatus?: "active" | "resting" | "done"
+}) {
+  const isMale    = player.gender === "male"
+  const isResting = playStatus === "resting"
+  const isDone    = playStatus === "done"
   return (
     <div
       className={cn(
         "flex items-center gap-1.5 rounded-full border px-3 py-1",
+        isDone    ? "border-border bg-muted opacity-50" :
+        isResting ? "border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-900/20" :
         isMale
           ? "border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-900/20"
           : "border-pink-200 bg-pink-50 dark:border-pink-800 dark:bg-pink-900/20",
@@ -977,6 +1007,8 @@ function QueueChip({ player, position }: { player: SessionParticipant; position:
         {player.level}
       </span>
       <span className="text-sm">{player.memberName}</span>
+      {isResting && <span className="text-xs font-medium text-amber-600 dark:text-amber-400">휴식</span>}
+      {isDone    && <span className="text-xs text-muted-foreground">종료</span>}
     </div>
   )
 }
@@ -1054,11 +1086,13 @@ function GuestAddSheet({
 function PlayerPicker({
   title,
   queue,
+  playStatuses,
   onPick,
   onClose,
 }: {
   title: string
   queue: SessionParticipant[]
+  playStatuses: PlayStatusMap
   onPick: (player: SessionParticipant) => void
   onClose: () => void
 }) {
@@ -1074,13 +1108,18 @@ function PlayerPicker({
           ) : (
             <div className="flex flex-col gap-2">
               {queue.map((p) => {
-                const isMale = p.gender === "male"
+                const isMale      = p.gender === "male"
+                const ps          = isGuest(p) ? "active" : (playStatuses[p.memberId] ?? "active")
+                const isResting   = ps === "resting"
+                const isDone      = ps === "done"
                 return (
                   <button
                     key={p.memberId}
                     onClick={() => onPick(p)}
                     className={cn(
                       "flex items-center gap-3 rounded-xl border px-4 py-3 text-left transition-colors hover:opacity-80 active:scale-95",
+                      isDone    ? "border-border bg-muted opacity-60" :
+                      isResting ? "border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-900/20" :
                       isMale
                         ? "border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-900/20"
                         : "border-pink-200 bg-pink-50 dark:border-pink-800 dark:bg-pink-900/20",
@@ -1089,10 +1128,20 @@ function PlayerPicker({
                     <span className={cn("size-6 shrink-0 rounded-full text-center text-xs font-bold leading-6", LEVEL_COLORS[p.level])}>
                       {p.level}
                     </span>
-                    <div>
+                    <div className="flex-1">
                       <p className="text-sm font-medium">{p.memberName}</p>
                       <p className="text-xs text-muted-foreground">{isMale ? "남" : "여"} · {p.level}급</p>
                     </div>
+                    {isResting && (
+                      <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+                        휴식 중
+                      </span>
+                    )}
+                    {isDone && (
+                      <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+                        종료
+                      </span>
+                    )}
                   </button>
                 )
               })}
