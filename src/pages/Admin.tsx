@@ -277,19 +277,34 @@ function SessionPaymentManager({
                 <Unlock className="size-3.5" />{loadingId === "status" ? "처리 중..." : "모집 재개"}
               </Button>
             )}
-            {session.status !== "completed" && session.status !== "cancelled" && (
+            {(session.status === "closed" || session.status === "in_progress") && (
               <Button size="sm" variant="outline" disabled={loadingId === "status"} onClick={() => setShowCompleteConfirm(true)}>
                 <Flag className="size-3.5" />{loadingId === "status" ? "처리 중..." : "종료 처리"}
               </Button>
             )}
           </div>
-          {session.status !== "completed" && session.participants.filter(p => p.status === "confirmed").length > 0 && (
+          {session.status === "closed" && session.participants.filter(p => p.status === "confirmed").length > 0 && (
+            <Button
+              size="sm"
+              className="mt-2 w-full"
+              disabled={loadingId === "status"}
+              onClick={async () => {
+                setLoadingId("status")
+                await onUpdateStatus("in_progress")
+                setLoadingId(null)
+                onStartPlay()
+              }}
+            >
+              <Play className="size-3.5" />{loadingId === "status" ? "시작 중..." : "정모 시작"}
+            </Button>
+          )}
+          {session.status === "in_progress" && (
             <Button
               size="sm"
               className="mt-2 w-full"
               onClick={onStartPlay}
             >
-              <Play className="size-3.5" />정모 진행
+              <Play className="size-3.5" />정모 진행 (재진입)
             </Button>
           )}
           <div className="mt-2 flex gap-2 border-t border-border pt-2">
@@ -462,8 +477,8 @@ function SessionsAdmin({
   onCreateSession: () => void
 }) {
   const sorted = [...sessions].sort((a, b) => {
-    const aActive = a.status === "open" || a.status === "closed"
-    const bActive = b.status === "open" || b.status === "closed"
+    const aActive = a.status === "open" || a.status === "closed" || a.status === "in_progress"
+    const bActive = b.status === "open" || b.status === "closed" || b.status === "in_progress"
     if (aActive && !bActive) return -1
     if (!aActive && bActive) return 1
     // 활성 정모는 날짜 임박순, 나머지는 최신순

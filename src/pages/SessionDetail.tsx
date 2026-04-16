@@ -68,7 +68,7 @@ export function SessionDetail({
   )
 
   const levelAllowed = !session.levelRestriction || session.levelRestriction.includes(currentUser.level)
-  const isToday = new Date().toLocaleDateString("sv") === session.date && session.status !== "completed"
+  const isToday = new Date().toLocaleDateString("sv") === session.date && session.status === "in_progress"
 
   // 대기 순번 (1부터)
   const myWaitlistPosition = waitlistedParticipants.findIndex(
@@ -288,7 +288,7 @@ export function SessionDetail({
             </div>
           ) : session.status !== "open" ? (
             <div className="rounded-xl bg-muted px-4 py-3 text-center text-sm text-muted-foreground">
-              {session.status === "completed" ? "종료된 모임입니다" : "모집이 마감되었습니다"}
+              {session.status === "completed" ? "종료된 모임입니다" : session.status === "in_progress" ? "현재 진행 중인 모임입니다" : "모집이 마감되었습니다"}
             </div>
           ) : spotsLeft > 0 ? (
             <Button className="w-full" size="lg" disabled={actionLoading} onClick={() => setShowReserveSheet(true)}>

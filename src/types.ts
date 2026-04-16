@@ -1,6 +1,6 @@
 export type BadmintonLevel = "S" | "A" | "B" | "C" | "D"
 export type Gender = "male" | "female"
-export type SessionStatus = "open" | "closed" | "completed" | "cancelled"
+export type SessionStatus = "open" | "closed" | "in_progress" | "completed" | "cancelled"
 export type ReservationStatus = "confirmed" | "pending" | "waitlisted" | "cancelled"
 export type Page = "home" | "sessions" | "session-detail" | "session-match" | "session-play" | "my-reservations" | "profile" | "admin"
 

@@ -39,13 +39,13 @@ export function Home({ currentUser, sessions, reservations, onNavigate }: HomePr
     .sort((a, b) => a.date.localeCompare(b.date))
     .slice(0, 3)
 
-  // 오늘 confirmed 예약 (진행 중 섹션에만 표시)
+  // 오늘 confirmed 예약 (진행 중 섹션에만 표시) — 세션이 in_progress 상태일 때만
   const liveReservation = reservations.find((r) => r.date === todayStr && r.status === "confirmed")
   const liveSession =
     liveReservation
-      ? (sessions.find((s) => s.id === liveReservation.sessionId) ?? null)
+      ? (sessions.find((s) => s.id === liveReservation.sessionId && s.status === "in_progress") ?? null)
       : currentUser.isAdmin
-        ? (sessions.find((s) => s.date === todayStr && s.status !== "completed") ?? null)
+        ? (sessions.find((s) => s.date === todayStr && s.status === "in_progress") ?? null)
         : null
 
   // 내 예정 모임 — 오늘 confirmed는 제외

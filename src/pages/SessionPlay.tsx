@@ -1,10 +1,10 @@
 import { useState, useEffect } from "react"
-import { ChevronLeft, Zap, X, History, Plus } from "lucide-react"
+import { ChevronLeft, Zap, X, History, Plus, UserPlus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { LEVEL_COLORS, formatDate } from "@/lib/badminton"
 import { courtsApi } from "@/lib/api"
-import type { BadmintonLevel, BbangSession, Page, SessionParticipant } from "@/types"
+import type { BadmintonLevel, BbangSession, Gender, Page, SessionParticipant } from "@/types"
 
 // ─── 타입 ────────────────────────────────────────────────────────────────────
 
@@ -134,6 +134,10 @@ function balanceTeams(players: SessionParticipant[]): SessionParticipant[] {
   return [players[best[0]], players[best[1]], players[best[2]], players[best[3]]]
 }
 
+function isGuest(player: SessionParticipant) {
+  return player.memberId.startsWith("guest-")
+}
+
 // ─── 메인 컴포넌트 ────────────────────────────────────────────────────────────
 
 interface SessionPlayProps {
@@ -168,6 +172,7 @@ export function SessionPlay({ session, onNavigate }: SessionPlayProps) {
   const [activeSlot, setActiveSlot]     = useState<ActiveSlot | null>(null)
   const [showHistory, setShowHistory]   = useState(false)
   const [autoMode, setAutoMode]         = useState(false)
+  const [showGuestModal, setShowGuestModal] = useState(false)
 
   // 마운트 시 저장된 코트 상태 로드
   useEffect(() => {
@@ -201,12 +206,12 @@ export function SessionPlay({ session, onNavigate }: SessionPlayProps) {
     const courtPayload = updatedCourts.map((c, i) => ({
       courtNumber: i + 1,
       status: c.status,
-      slots: c.players.map((p) => p?.memberId ?? null),
+      slots: c.players.map((p) => (p && !isGuest(p)) ? p.memberId : null),
     }))
     const pendingPayload = pending.map((g, i) => ({
       courtNumber: session.courtCount + i + 1,
       status: "pending" as const,
-      slots: g.players.map((p) => p?.memberId ?? null),
+      slots: g.players.map((p) => (p && !isGuest(p)) ? p.memberId : null),
     }))
     courtsApi.update(session.id, [...courtPayload, ...pendingPayload]).catch(() => {})
   }
@@ -394,6 +399,22 @@ export function SessionPlay({ session, onNavigate }: SessionPlayProps) {
 
     setQueue((prev) => prev.filter((p) => p.memberId !== player.memberId))
     setActiveSlot(null)
+  }
+
+  // ── 게스트 추가 ────────────────────────────────────────────────────────────
+
+  function handleAddGuest(name: string, gender: Gender, level: BadmintonLevel) {
+    const guest: SessionParticipant = {
+      memberId: `guest-${crypto.randomUUID()}`,
+      memberName: name,
+      gender,
+      level,
+      reservedAt: new Date().toISOString(),
+      status: "confirmed",
+      usedFreeTicket: false,
+    }
+    setQueue((prev) => [...prev, guest])
+    setShowGuestModal(false)
   }
 
   // ── 자동 배정 (전체) ────────────────────────────────────────────────────────
@@ -627,7 +648,16 @@ export function SessionPlay({ session, onNavigate }: SessionPlayProps) {
           <section className="rounded-xl border border-border bg-card p-4">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="font-semibold text-sm">대기 중</h2>
-              <span className="text-xs text-muted-foreground">{queue.length}명</span>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">{queue.length}명</span>
+                <button
+                  onClick={() => setShowGuestModal(true)}
+                  className="flex items-center gap-0.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <UserPlus className="size-3.5" />
+                  게스트
+                </button>
+              </div>
             </div>
             {queue.length === 0 ? (
               <p className="py-3 text-center text-sm text-muted-foreground">대기자 없음</p>
@@ -665,6 +695,14 @@ export function SessionPlay({ session, onNavigate }: SessionPlayProps) {
           queue={queue}
           onPick={handlePickPlayer}
           onClose={() => setActiveSlot(null)}
+        />
+      )}
+
+      {/* 게스트 추가 모달 */}
+      {showGuestModal && (
+        <GuestAddSheet
+          onAdd={handleAddGuest}
+          onClose={() => setShowGuestModal(false)}
         />
       )}
     </div>
@@ -940,6 +978,76 @@ function QueueChip({ player, position }: { player: SessionParticipant; position:
       </span>
       <span className="text-sm">{player.memberName}</span>
     </div>
+  )
+}
+
+function GuestAddSheet({
+  onAdd,
+  onClose,
+}: {
+  onAdd: (name: string, gender: Gender, level: BadmintonLevel) => void
+  onClose: () => void
+}) {
+  const [name, setName] = useState("")
+  const [gender, setGender] = useState<Gender>("male")
+  const [level, setLevel] = useState<BadmintonLevel>("B")
+
+  return (
+    <>
+      <div className="fixed inset-0 z-40 bg-black/50" onClick={onClose} />
+      <div className="fixed bottom-0 left-0 right-0 z-50 rounded-t-2xl bg-background px-5 pb-24 pt-5 shadow-xl">
+        <div className="mx-auto max-w-lg">
+          <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-muted" />
+          <p className="mb-4 text-center text-sm font-semibold">게스트 추가</p>
+          <div className="flex flex-col gap-3">
+            <input
+              type="text"
+              placeholder="이름"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && name.trim() && onAdd(name.trim(), gender, level)}
+              autoFocus
+              className="w-full rounded-xl border border-border bg-muted/50 px-4 py-3 text-sm outline-none focus:border-primary"
+            />
+            <div className="flex gap-2">
+              {(["male", "female"] as Gender[]).map((g) => (
+                <button
+                  key={g}
+                  onClick={() => setGender(g)}
+                  className={cn(
+                    "flex-1 rounded-xl border py-2.5 text-sm font-medium transition-colors",
+                    gender === g
+                      ? g === "male"
+                        ? "border-blue-400 bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
+                        : "border-pink-400 bg-pink-50 text-pink-700 dark:bg-pink-900/40 dark:text-pink-300"
+                      : "border-border text-muted-foreground",
+                  )}
+                >
+                  {g === "male" ? "남성" : "여성"}
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              {(["S", "A", "B", "C", "D"] as BadmintonLevel[]).map((l) => (
+                <button
+                  key={l}
+                  onClick={() => setLevel(l)}
+                  className={cn(
+                    "flex-1 rounded-xl border py-2.5 text-sm font-medium transition-colors",
+                    level === l ? cn(LEVEL_COLORS[l], "border-transparent") : "border-border text-muted-foreground",
+                  )}
+                >
+                  {l}급
+                </button>
+              ))}
+            </div>
+            <Button className="w-full" disabled={!name.trim()} onClick={() => onAdd(name.trim(), gender, level)}>
+              대기열에 추가
+            </Button>
+          </div>
+        </div>
+      </div>
+    </>
   )
 }
 

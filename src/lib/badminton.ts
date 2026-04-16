@@ -14,6 +14,7 @@ export const STATUS_CONFIG: Record<
 > = {
   open: { label: "모집중", variant: "success" },
   closed: { label: "마감", variant: "destructive" },
+  in_progress: { label: "진행중", variant: "warning" },
   completed: { label: "완료", variant: "secondary" },
   cancelled: { label: "취소", variant: "outline" },
 }
