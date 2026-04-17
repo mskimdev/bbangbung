@@ -221,7 +221,7 @@ function balanceTeams(players: SessionParticipant[]): SessionParticipant[] {
     return diff1 <= diff2 ? [m1, f1, m2, f2] : [m1, f2, m2, f1]
   }
 
-  const splits = [[0,1,2,3],[0,2,1,3],[0,3,1,2]] as const
+  const splits = [[0,1,2,3],[0,2,1,3],[0,3,1,2]] as [number, number, number, number][]
   let best = splits[0], bestDiff = Infinity
   for (const combo of splits) {
     const diff = Math.abs((s(players[combo[0]]) + s(players[combo[1]])) - (s(players[combo[2]]) + s(players[combo[3]])))
