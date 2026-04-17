@@ -6,40 +6,84 @@ import { LEVEL_COLORS, formatDate } from "@/lib/badminton"
 import { courtsApi, playStatusApi } from "@/lib/api"
 import type { BadmintonLevel, BbangSession, CourtSlotApi, Gender, Page, PlayStatus, PlayStatusMap, SessionParticipant } from "@/types"
 
-// ─── 타입 ────────────────────────────────────────────────────────────────────
+// ─── 타입 ─────────────────────────────────────────────────────────────────────
 
 type MatchType = "free" | "mixed" | "male" | "female"
+type PlayMode  = "manual" | "auto" | "full-auto"
 
 const MATCH_TYPE_LABELS: Record<MatchType, string> = {
-  free:   "자유",
-  mixed:  "혼복",
-  male:   "남복",
-  female: "여복",
+  free: "자유", mixed: "혼복", male: "남복", female: "여복",
+}
+const MODE_LABELS: Record<PlayMode, string> = {
+  manual: "수동 모드", auto: "Auto 모드", "full-auto": "풀오토 모드",
+}
+const MODE_DESCS: Record<PlayMode, string> = {
+  manual:      "각 코트에서 방식 선택",
+  auto:        "전체 코트 자동 배정",
+  "full-auto": "경기 종료 시 자동 재배정",
+}
+const MODE_SHORT: Record<PlayMode, string> = {
+  manual: "수동", auto: "Auto", "full-auto": "풀오토",
 }
 
 interface GameRecord {
-  gameNumber: number
+  gameNumber:  number
   courtNumber: number
-  playerIds: string[]   // sorted
+  playerIds:   string[]   // sorted
   playerNames: string[]
+  duration?:   number     // seconds
 }
 
 interface CourtState {
-  players: (SessionParticipant | null)[]  // 4 slots
-  status: "idle" | "playing"
+  players:   (SessionParticipant | null)[]  // 4 slots
+  status:    "idle" | "playing"
+  startedAt: number | null
 }
 
 interface PendingGame {
-  id: string
-  players: (SessionParticipant | null)[]  // 4 slots, 수동 배정 지원
+  id:      string
+  players: (SessionParticipant | null)[]
 }
 
-// court 슬롯 or pending 게임 슬롯 구분
 type ActiveSlot =
   | { target: "court";   courtIndex: number; position: 0 | 1 | 2 | 3 }
   | { target: "pending"; gameId: string;     position: 0 | 1 | 2 | 3 }
 
+type PairCount = Record<string, number>  // key: "idA|idB" (sorted)
+type PlayCount = Record<string, number>  // key: memberId
+
 // ─── 알고리즘 ─────────────────────────────────────────────────────────────────
+
+const LEVEL_SCORES: Record<BadmintonLevel, number> = { S: 5, A: 4, B: 3, C: 2, D: 1 }
+
+function pairKey(a: string, b: string): string {
+  return a < b ? `${a}|${b}` : `${b}|${a}`
+}
+
+function getComboTotalPairCount(players: SessionParticipant[], pc: PairCount): number {
+  let total = 0
+  for (let i = 0; i < players.length; i++)
+    for (let j = i + 1; j < players.length; j++)
+      total += pc[pairKey(players[i].memberId, players[j].memberId)] ?? 0
+  return total
+}
+
+function bestTeamDiff(players: SessionParticipant[]): number {
+  const s = (p: SessionParticipant) => LEVEL_SCORES[p.level]
+  const splits = [[0,1,2,3],[0,2,1,3],[0,3,1,2]] as const
+  let min = Infinity
+  for (const [a,b,c,d] of splits) {
+    const diff = Math.abs((s(players[a]) + s(players[b])) - (s(players[c]) + s(players[d])))
+    if (diff < min) min = diff
+  }
+  return min
+}
+
+// 남3녀1 / 남1녀3 조합 감지
+function hasGenderImbalance(players: SessionParticipant[]): boolean {
+  const m = players.filter(p => p.gender === "male").length
+  return m === 1 || m === 3
+}
 
 function getCourtPlayers(court: CourtState): SessionParticipant[] {
   return court.players.filter(Boolean) as SessionParticipant[]
@@ -49,222 +93,276 @@ function getPendingPlayers(game: PendingGame): SessionParticipant[] {
   return game.players.filter(Boolean) as SessionParticipant[]
 }
 
-function hasPlayedTogether(players: SessionParticipant[], history: GameRecord[]): boolean {
-  const key = players.map((p) => p.memberId).sort().join(",")
-  return history.some((g) => g.playerIds.join(",") === key)
+function isGuest(player: SessionParticipant) {
+  return player.memberId.startsWith("guest-")
 }
 
-function pickNextFour(subset: SessionParticipant[], history: GameRecord[]): SessionParticipant[] | null {
-  if (subset.length < 4) return null
+// C(n,4) 완전 탐색: pairCount 최소 → playCount 합 최소 → teamDiff 최소
+function findBestFour(
+  pool:         SessionParticipant[],
+  pc:           PairCount,
+  plc:          PlayCount,
+  maxTeamDiff:  number,
+  allowImbalance: boolean,
+): SessionParticipant[] | null {
+  if (pool.length < 4) return null
 
-  const first3 = subset.slice(0, 3)
-  for (let i = 3; i < subset.length; i++) {
-    const candidate = [...first3, subset[i]]
-    if (!hasPlayedTogether(candidate, history)) return candidate
-  }
+  let best: SessionParticipant[] | null = null
+  let bestPC = Infinity, bestPL = Infinity, bestTD = Infinity
 
-  const first2 = subset.slice(0, 2)
-  for (let j = 3; j < subset.length; j++) {
-    for (let i = 2; i < j; i++) {
-      const candidate = [...first2, subset[i], subset[j]]
-      if (!hasPlayedTogether(candidate, history)) return candidate
+  for (let i = 0; i < pool.length - 3; i++) {
+    for (let j = i + 1; j < pool.length - 2; j++) {
+      for (let k = j + 1; k < pool.length - 1; k++) {
+        for (let l = k + 1; l < pool.length; l++) {
+          const combo = [pool[i], pool[j], pool[k], pool[l]]
+          if (!allowImbalance && hasGenderImbalance(combo)) continue
+          const td  = bestTeamDiff(combo)
+          if (td > maxTeamDiff) continue
+          const pct = getComboTotalPairCount(combo, pc)
+          const plt = combo.reduce((s, p) => s + (plc[p.memberId] ?? 0), 0)
+          if (
+            pct < bestPC ||
+            (pct === bestPC && plt < bestPL) ||
+            (pct === bestPC && plt === bestPL && td < bestTD)
+          ) { best = combo; bestPC = pct; bestPL = plt; bestTD = td }
+        }
+      }
     }
   }
+  return best
+}
 
-  return subset.slice(0, 4)
+// 점진적 제약 완화: diff≤1 → diff≤2 → gender허용 → 무제한
+function findBestFourWithRelaxation(
+  pool: SessionParticipant[],
+  pc:   PairCount,
+  plc:  PlayCount,
+): SessionParticipant[] | null {
+  return (
+    findBestFour(pool, pc, plc, 1, false) ??
+    findBestFour(pool, pc, plc, 2, false) ??
+    findBestFour(pool, pc, plc, 2, true)  ??
+    findBestFour(pool, pc, plc, Infinity, true)
+  )
+}
+
+// 혼복 전용: 반드시 2M+2F 조합
+function findBestMixed(
+  pool: SessionParticipant[],
+  pc:   PairCount,
+  plc:  PlayCount,
+): SessionParticipant[] | null {
+  const males   = pool.filter(p => p.gender === "male")
+  const females = pool.filter(p => p.gender === "female")
+  if (males.length < 2 || females.length < 2) return null
+
+  let best: SessionParticipant[] | null = null
+  let bestScore = Infinity
+
+  for (let i = 0; i < males.length - 1; i++) {
+    for (let j = i + 1; j < males.length; j++) {
+      for (let k = 0; k < females.length - 1; k++) {
+        for (let l = k + 1; l < females.length; l++) {
+          const combo = [males[i], males[j], females[k], females[l]]
+          const td    = bestTeamDiff(combo)
+          const pct   = getComboTotalPairCount(combo, pc)
+          const plt   = combo.reduce((s, p) => s + (plc[p.memberId] ?? 0), 0)
+          const score = pct * 1000 + plt * 10 + td
+          if (score < bestScore) { bestScore = score; best = combo }
+        }
+      }
+    }
+  }
+  return best
 }
 
 function pickGroup(
-  currentQueue: SessionParticipant[],
-  history: GameRecord[],
-  matchType: MatchType,
+  pool: SessionParticipant[],
+  type: MatchType,
+  pc:   PairCount,
+  plc:  PlayCount,
 ): SessionParticipant[] | null {
-  if (matchType === "male") {
-    return pickNextFour(currentQueue.filter((p) => p.gender === "male"), history)
-  }
-  if (matchType === "female") {
-    return pickNextFour(currentQueue.filter((p) => p.gender === "female"), history)
-  }
-  if (matchType === "mixed") {
-    const males   = currentQueue.filter((p) => p.gender === "male")
-    const females = currentQueue.filter((p) => p.gender === "female")
-    if (males.length < 2 || females.length < 2) return null
-    return [...males.slice(0, 2), ...females.slice(0, 2)]
-  }
-  return pickNextFour(currentQueue, history)
+  if (type === "male")   return findBestFourWithRelaxation(pool.filter(p => p.gender === "male"),   pc, plc)
+  if (type === "female") return findBestFourWithRelaxation(pool.filter(p => p.gender === "female"), pc, plc)
+  if (type === "mixed")  return findBestMixed(pool, pc, plc)
+  return findBestFourWithRelaxation(pool, pc, plc)
 }
 
-// ─── 팀 밸런싱 ───────────────────────────────────────────────────────────────
+function updateCounts(
+  players: SessionParticipant[],
+  pc:  PairCount,
+  plc: PlayCount,
+): { pairCount: PairCount; playCount: PlayCount } {
+  const newPC  = { ...pc }
+  const newPLC = { ...plc }
+  for (let i = 0; i < players.length; i++) {
+    newPLC[players[i].memberId] = (newPLC[players[i].memberId] ?? 0) + 1
+    for (let j = i + 1; j < players.length; j++) {
+      const k = pairKey(players[i].memberId, players[j].memberId)
+      newPC[k] = (newPC[k] ?? 0) + 1
+    }
+  }
+  return { pairCount: newPC, playCount: newPLC }
+}
 
-const LEVEL_SCORES: Record<BadmintonLevel, number> = { S: 5, A: 4, B: 3, C: 2, D: 1 }
+// ─── 팀 밸런싱 ────────────────────────────────────────────────────────────────
 
 function balanceTeams(players: SessionParticipant[]): SessionParticipant[] {
   if (players.length !== 4) return players
   const s = (p: SessionParticipant) => LEVEL_SCORES[p.level]
 
-  const males   = players.filter((p) => p.gender === "male")
-  const females = players.filter((p) => p.gender === "female")
+  const males   = players.filter(p => p.gender === "male")
+  const females = players.filter(p => p.gender === "female")
 
-  // 2남2여인 경우: 성비 균형(각 팀 1남1여) 우선, 그 다음 레벨 균형
   if (males.length === 2 && females.length === 2) {
-    const [m1, m2] = males
-    const [f1, f2] = females
+    const [m1, m2] = males, [f1, f2] = females
     const diff1 = Math.abs((s(m1) + s(f1)) - (s(m2) + s(f2)))
     const diff2 = Math.abs((s(m1) + s(f2)) - (s(m2) + s(f1)))
-    return diff1 <= diff2
-      ? [m1, f1, m2, f2]  // {m1,f1} vs {m2,f2}
-      : [m1, f2, m2, f1]  // {m1,f2} vs {m2,f1}
+    return diff1 <= diff2 ? [m1, f1, m2, f2] : [m1, f2, m2, f1]
   }
 
-  // 그 외(남복/여복 등): 레벨 균형만
-  const splits: [number, number, number, number][] = [
-    [0, 1, 2, 3],
-    [0, 2, 1, 3],
-    [0, 3, 1, 2],
-  ]
-  let best = splits[0]
-  let bestDiff = Infinity
+  const splits = [[0,1,2,3],[0,2,1,3],[0,3,1,2]] as const
+  let best = splits[0], bestDiff = Infinity
   for (const combo of splits) {
-    const diff = Math.abs(
-      (s(players[combo[0]]) + s(players[combo[1]])) -
-      (s(players[combo[2]]) + s(players[combo[3]])),
-    )
+    const diff = Math.abs((s(players[combo[0]]) + s(players[combo[1]])) - (s(players[combo[2]]) + s(players[combo[3]])))
     if (diff < bestDiff) { bestDiff = diff; best = combo }
   }
   return [players[best[0]], players[best[1]], players[best[2]], players[best[3]]]
 }
 
-function isGuest(player: SessionParticipant) {
-  return player.memberId.startsWith("guest-")
-}
-
 // ─── 메인 컴포넌트 ────────────────────────────────────────────────────────────
 
 interface SessionPlayProps {
-  session: BbangSession
+  session:       BbangSession
   playStatuses?: PlayStatusMap
-  courtUpdate?: CourtSlotApi[] | null
-  onNavigate: (page: Page) => void
+  courtUpdate?:  CourtSlotApi[] | null
+  onNavigate:    (page: Page) => void
 }
 
 export function SessionPlay({ session, playStatuses = {}, courtUpdate, onNavigate }: SessionPlayProps) {
-  const confirmed = session.participants.filter((p) => p.status === "confirmed")
+  const confirmed = session.participants.filter(p => p.status === "confirmed")
 
   const [courts, setCourts]             = useState<CourtState[]>(() =>
     Array.from({ length: session.courtCount }, () => ({
-      players: [null, null, null, null],
-      status: "idle" as const,
+      players:   [null, null, null, null] as (SessionParticipant | null)[],
+      status:    "idle" as const,
+      startedAt: null,
     })),
   )
   const [queue, setQueue]               = useState<SessionParticipant[]>(confirmed)
   const [pendingGames, setPendingGames] = useState<PendingGame[]>([])
-  const historyKey = `game-history-${session.id}`
-  const [history, setHistory] = useState<GameRecord[]>(() => {
-    try {
-      const saved = sessionStorage.getItem(`game-history-${session.id}`)
-      return saved ? (JSON.parse(saved) as GameRecord[]) : []
-    } catch {
-      return []
-    }
-  })
-  useEffect(() => {
-    sessionStorage.setItem(historyKey, JSON.stringify(history))
-  }, [history, historyKey])
 
-  const [activeSlot, setActiveSlot]     = useState<ActiveSlot | null>(null)
-  const [showHistory, setShowHistory]   = useState(false)
-  const [autoMode, setAutoMode]         = useState(false)
+  const historyKey   = `game-history-${session.id}`
+  const pairCountKey = `pair-count-${session.id}`
+  const playCountKey = `play-count-${session.id}`
+
+  const [history, setHistory] = useState<GameRecord[]>(() => {
+    try { return JSON.parse(sessionStorage.getItem(historyKey) ?? "null") ?? [] } catch { return [] }
+  })
+  const [pairCount, setPairCount] = useState<PairCount>(() => {
+    try { return JSON.parse(sessionStorage.getItem(pairCountKey) ?? "null") ?? {} } catch { return {} }
+  })
+  const [playCount, setPlayCount] = useState<PlayCount>(() => {
+    try { return JSON.parse(sessionStorage.getItem(playCountKey) ?? "null") ?? {} } catch { return {} }
+  })
+
+  useEffect(() => { sessionStorage.setItem(historyKey,   JSON.stringify(history))   }, [history,    historyKey])
+  useEffect(() => { sessionStorage.setItem(pairCountKey, JSON.stringify(pairCount)) }, [pairCount,  pairCountKey])
+  useEffect(() => { sessionStorage.setItem(playCountKey, JSON.stringify(playCount)) }, [playCount,  playCountKey])
+
+  const [activeSlot, setActiveSlot]         = useState<ActiveSlot | null>(null)
+  const [showHistory, setShowHistory]       = useState(false)
+  const [mode, setMode]                     = useState<PlayMode>("manual")
   const [showGuestModal, setShowGuestModal] = useState(false)
 
-  // 자신이 저장한 court-update SSE echo를 무시하기 위한 플래그
   const ownSaveRef = useRef(false)
 
-  // 마운트 시 저장된 코트 상태 로드 (이슈 4: 대기 게임도 복원)
+  // ── 마운트 시 저장된 코트 상태 로드 ────────────────────────────────────────
+
   useEffect(() => {
-    courtsApi.get(session.id).then((res) => {
+    courtsApi.get(session.id).then(res => {
       if (res.data.length === 0) return
-      const allConfirmed = session.participants.filter((p) => p.status === "confirmed")
-      const byId = Object.fromEntries(allConfirmed.map((p) => [p.memberId, p]))
-      const loadedByNumber = Object.fromEntries(
-        res.data.map((c) => [c.courtNumber, c])
-      )
+      const allConfirmed = session.participants.filter(p => p.status === "confirmed")
+      const byId         = Object.fromEntries(allConfirmed.map(p => [p.memberId, p]))
+      const loadedByNum  = Object.fromEntries(res.data.map(c => [c.courtNumber, c]))
+
       const loadedCourts = Array.from({ length: session.courtCount }, (_, i) => {
-        const c = loadedByNumber[i + 1]
-        if (!c) return { status: "idle" as const, players: [null, null, null, null] as (SessionParticipant | null)[] }
+        const c = loadedByNum[i + 1]
+        if (!c) return { status: "idle" as const, players: [null, null, null, null] as (SessionParticipant | null)[], startedAt: null }
         return {
-          status: c.status as "idle" | "playing",
-          players: c.slots.map((id) => (id ? (byId[id] ?? null) : null)) as (SessionParticipant | null)[],
+          status:    c.status as "idle" | "playing",
+          players:   c.slots.map(id => id ? (byId[id] ?? null) : null) as (SessionParticipant | null)[],
+          startedAt: c.startedAt ?? null,
         }
       })
-      // 대기 게임 복원 (courtNumber > courtCount)
       const loadedPending = res.data
-        .filter((c) => c.courtNumber > session.courtCount)
-        .map((c) => ({
-          id: crypto.randomUUID(),
-          players: c.slots.map((id) => (id ? (byId[id] ?? null) : null)) as (SessionParticipant | null)[],
+        .filter(c => c.courtNumber > session.courtCount)
+        .map(c => ({
+          id:      crypto.randomUUID(),
+          players: c.slots.map(id => id ? (byId[id] ?? null) : null) as (SessionParticipant | null)[],
         }))
-      // 코트 + 대기 게임에 배정된 전체 선수를 대기열에서 제외
-      const onCourtIds = new Set(
-        res.data.flatMap((c) => c.slots.filter(Boolean) as string[])
-      )
+      const onCourtIds = new Set(res.data.flatMap(c => c.slots.filter(Boolean) as string[]))
       setCourts(loadedCourts)
       setPendingGames(loadedPending)
-      setQueue(allConfirmed.filter((p) => !onCourtIds.has(p.memberId)))
+      setQueue(allConfirmed.filter(p => !onCourtIds.has(p.memberId)))
     }).catch(() => {})
   }, [session.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 코트 상태를 백엔드에 저장 + SSE push (fire-and-forget)
+  // ── 코트 상태 저장 + SSE push ──────────────────────────────────────────────
+
   function saveCourts(updatedCourts: CourtState[], updatedPending?: PendingGame[]) {
-    const pending = updatedPending ?? pendingGames
-    const courtPayload = updatedCourts.map((c, i) => ({
+    const pending        = updatedPending ?? pendingGames
+    const courtPayload   = updatedCourts.map((c, i) => ({
       courtNumber: i + 1,
-      status: c.status,
-      slots: c.players.map((p) => (p && !isGuest(p)) ? p.memberId : null),
+      status:      c.status,
+      slots:       c.players.map(p => (p && !isGuest(p)) ? p.memberId : null),
+      startedAt:   c.startedAt ?? null,
     }))
     const pendingPayload = pending.map((g, i) => ({
       courtNumber: session.courtCount + i + 1,
-      status: "pending" as const,
-      slots: g.players.map((p) => (p && !isGuest(p)) ? p.memberId : null),
+      status:      "pending" as const,
+      slots:       g.players.map(p => (p && !isGuest(p)) ? p.memberId : null),
+      startedAt:   null,
     }))
-    // 자신이 보낸 SSE echo를 무시하기 위해 2초간 플래그 설정
     ownSaveRef.current = true
     setTimeout(() => { ownSaveRef.current = false }, 2000)
     courtsApi.update(session.id, [...courtPayload, ...pendingPayload]).catch(() => {})
   }
 
-  // 이슈 3: 다른 관리자의 코트 변경 실시간 반영 (자신의 저장 echo는 무시)
+  // ── 다른 관리자의 코트 변경 실시간 반영 ────────────────────────────────────
+
   useEffect(() => {
     if (!courtUpdate || ownSaveRef.current) return
-    const allConfirmed = session.participants.filter((p) => p.status === "confirmed")
-    const byId = Object.fromEntries(allConfirmed.map((p) => [p.memberId, p]))
+    const allConfirmed = session.participants.filter(p => p.status === "confirmed")
+    const byId         = Object.fromEntries(allConfirmed.map(p => [p.memberId, p]))
 
     const newCourts = Array.from({ length: session.courtCount }, (_, i) => {
-      const c = courtUpdate.find((x) => x.courtNumber === i + 1)
-      if (!c) return { status: "idle" as const, players: [null, null, null, null] as (SessionParticipant | null)[] }
+      const c = courtUpdate.find(x => x.courtNumber === i + 1)
+      if (!c) return { status: "idle" as const, players: [null, null, null, null] as (SessionParticipant | null)[], startedAt: null }
       return {
-        status: c.status as "idle" | "playing",
-        players: c.slots.map((id) => (id ? (byId[id] ?? null) : null)) as (SessionParticipant | null)[],
+        status:    c.status as "idle" | "playing",
+        players:   c.slots.map(id => id ? (byId[id] ?? null) : null) as (SessionParticipant | null)[],
+        startedAt: c.startedAt ?? null,
       }
     })
-
     const newPending = courtUpdate
-      .filter((c) => c.courtNumber > session.courtCount)
-      .map((c) => ({
-        id: crypto.randomUUID(),
-        players: c.slots.map((id) => (id ? (byId[id] ?? null) : null)) as (SessionParticipant | null)[],
+      .filter(c => c.courtNumber > session.courtCount)
+      .map(c => ({
+        id:      crypto.randomUUID(),
+        players: c.slots.map(id => id ? (byId[id] ?? null) : null) as (SessionParticipant | null)[],
       }))
-
-    const assignedIds = new Set(courtUpdate.flatMap((c) => c.slots.filter(Boolean) as string[]))
+    const assignedIds = new Set(courtUpdate.flatMap(c => c.slots.filter(Boolean) as string[]))
 
     setCourts(newCourts)
     setPendingGames(newPending)
-    setQueue((prev) => [
-      ...allConfirmed.filter((p) => !assignedIds.has(p.memberId)),
-      ...prev.filter((p) => isGuest(p)),  // 게스트는 대기열에 유지
+    setQueue(prev => [
+      ...allConfirmed.filter(p => !assignedIds.has(p.memberId)),
+      ...prev.filter(p => isGuest(p)),
     ])
   }, [courtUpdate]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 휴식/종료 참가자는 자동 배정에서 제외
+  // ── 플레이 상태 ─────────────────────────────────────────────────────────────
+
   function isActivePlayer(player: SessionParticipant): boolean {
     if (isGuest(player)) return true
     const s = playStatuses[player.memberId]
@@ -272,22 +370,21 @@ export function SessionPlay({ session, playStatuses = {}, courtUpdate, onNavigat
   }
   const activeQueue = queue.filter(isActivePlayer)
 
-  // 이슈 1: 관리자가 대기열에서 참가자 플레이 상태 변경 (탭으로 순환)
   function handleAdminStatusCycle(player: SessionParticipant) {
     if (isGuest(player)) return
     const current: PlayStatus = playStatuses[player.memberId] ?? "active"
-    const next: PlayStatus = current === "active" ? "resting" : current === "resting" ? "done" : "active"
+    const next: PlayStatus    = current === "active" ? "resting" : current === "resting" ? "done" : "active"
     playStatusApi.set(session.id, player.memberId, next).catch(() => {})
   }
 
-  const playingCount   = courts.filter((c) => c.status === "playing").reduce((s, c) => s + getCourtPlayers(c).length, 0)
+  // ── 통계 ────────────────────────────────────────────────────────────────────
+
+  const playingCount  = courts.filter(c => c.status === "playing").reduce((s, c) => s + getCourtPlayers(c).length, 0)
   const totalGameCount = history.length
-  const maleCount      = activeQueue.filter((p) => p.gender === "male").length
-  const femaleCount    = activeQueue.filter((p) => p.gender === "female").length
-
-  const canAutoAssign  = activeQueue.length >= 4
-
-  const hasIdleCourt   = courts.some((c) => c.status === "idle" && getCourtPlayers(c).length === 0)
+  const maleCount     = activeQueue.filter(p => p.gender === "male").length
+  const femaleCount   = activeQueue.filter(p => p.gender === "female").length
+  const canAutoAssign = activeQueue.length >= 4
+  const hasIdleCourt  = courts.some(c => c.status === "idle" && getCourtPlayers(c).length === 0)
 
   function canAssignType(type: MatchType) {
     if (type === "male")   return maleCount >= 4
@@ -303,10 +400,10 @@ export function SessionPlay({ session, playStatuses = {}, courtUpdate, onNavigat
     const player = courts[courtIndex].players[position]
 
     if (player) {
-      const newCourts = courts.map((c) => ({ ...c, players: [...c.players] }))
+      const newCourts = courts.map(c => ({ ...c, players: [...c.players] }))
       newCourts[courtIndex].players[position] = null
       setCourts(newCourts)
-      setQueue((prev) => [...prev, player])
+      setQueue(prev => [...prev, player])
       saveCourts(newCourts)
     } else {
       setActiveSlot({ target: "court", courtIndex, position })
@@ -316,7 +413,7 @@ export function SessionPlay({ session, playStatuses = {}, courtUpdate, onNavigat
   function handleGameStart(courtIndex: number) {
     if (getCourtPlayers(courts[courtIndex]).length < 4) return
     const newCourts = courts.map((c, i) =>
-      i === courtIndex ? { ...c, status: "playing" as const } : c,
+      i === courtIndex ? { ...c, status: "playing" as const, startedAt: Date.now() } : c,
     )
     setCourts(newCourts)
     saveCourts(newCourts)
@@ -327,54 +424,64 @@ export function SessionPlay({ session, playStatuses = {}, courtUpdate, onNavigat
     const players = getCourtPlayers(court)
     if (players.length === 0) return
 
-    const newHistory = [
+    const duration = court.startedAt ? Math.floor((Date.now() - court.startedAt) / 1000) : undefined
+
+    const newHistory: GameRecord[] = [
       ...history,
       {
         gameNumber:  totalGameCount + 1,
         courtNumber: courtIndex + 1,
-        playerIds:   players.map((p) => p.memberId).sort(),
-        playerNames: players.map((p) => p.memberName),
+        playerIds:   players.map(p => p.memberId).sort(),
+        playerNames: players.map(p => p.memberName),
+        duration,
       },
     ]
 
-    // 종료된 선수들을 대기열에 합친 뒤 auto 모드면 바로 그 코트 재배정
+    // pairCount / playCount 업데이트
+    const { pairCount: newPC, playCount: newPLC } = updateCounts(players, pairCount, playCount)
+
     const returnedQueue = [...queue, ...players]
     let newCourts = courts.map((c, i) =>
-      i === courtIndex ? { players: [null, null, null, null] as (SessionParticipant | null)[], status: "idle" as const } : c,
+      i === courtIndex
+        ? { players: [null, null, null, null] as (SessionParticipant | null)[], status: "idle" as const, startedAt: null }
+        : c,
     )
     let newQueue = returnedQueue
 
-    if (autoMode) {
-      const returnedActiveQueue = returnedQueue.filter(isActivePlayer)
-      const four = pickGroup(returnedActiveQueue, newHistory, "free")
+    if (mode === "auto" || mode === "full-auto") {
+      const returnedActive = returnedQueue.filter(isActivePlayer)
+      const four = pickGroup(returnedActive, "free", newPC, newPLC)
       if (four) {
         newCourts = newCourts.map((c, i) =>
           i === courtIndex ? { ...c, players: balanceTeams(four) as (SessionParticipant | null)[] } : c,
         )
-        const usedIds = new Set(four.map((p) => p.memberId))
-        newQueue = returnedQueue.filter((p) => !usedIds.has(p.memberId))
+        const usedIds = new Set(four.map(p => p.memberId))
+        newQueue = returnedQueue.filter(p => !usedIds.has(p.memberId))
       }
+      // four === null → 유효 조합 없음, 대기 (players 큐에 남음)
     }
 
     setHistory(newHistory)
+    setPairCount(newPC)
+    setPlayCount(newPLC)
     setQueue(newQueue)
     setCourts(newCourts)
     saveCourts(newCourts)
   }
 
-  // ── 대기 게임 슬롯 ─────────────────────────────────────────────────────────
+  // ── 대기 게임 ──────────────────────────────────────────────────────────────
 
   function handlePendingSlotClick(gameId: string, position: 0 | 1 | 2 | 3) {
-    const game = pendingGames.find((g) => g.id === gameId)
+    const game = pendingGames.find(g => g.id === gameId)
     if (!game) return
     const player = game.players[position]
 
     if (player) {
-      const newPending = pendingGames.map((g) =>
-        g.id !== gameId ? g : { ...g, players: g.players.map((p, i) => (i === position ? null : p)) },
+      const newPending = pendingGames.map(g =>
+        g.id !== gameId ? g : { ...g, players: g.players.map((p, i) => i === position ? null : p) },
       )
       setPendingGames(newPending)
-      setQueue((prev) => [...prev, player])
+      setQueue(prev => [...prev, player])
       saveCourts(courts, newPending)
     } else {
       setActiveSlot({ target: "pending", gameId, position })
@@ -389,80 +496,76 @@ export function SessionPlay({ session, playStatuses = {}, courtUpdate, onNavigat
   }
 
   function handleAssignPending(gameId: string) {
-    const game = pendingGames.find((g) => g.id === gameId)
+    const game = pendingGames.find(g => g.id === gameId)
     if (!game || getPendingPlayers(game).length < 4) return
-    const courtIndex = courts.findIndex(
-      (c) => c.status === "idle" && getCourtPlayers(c).length === 0,
-    )
+    const courtIndex = courts.findIndex(c => c.status === "idle" && getCourtPlayers(c).length === 0)
     if (courtIndex === -1) return
 
-    const newCourts = courts.map((c) => ({ ...c, players: [...c.players] }))
+    const newCourts  = courts.map(c => ({ ...c, players: [...c.players] }))
     const gamePlayers = game.players.filter(Boolean) as SessionParticipant[]
     newCourts[courtIndex].players = balanceTeams(gamePlayers) as (SessionParticipant | null)[]
-    const newPending = pendingGames.filter((g) => g.id !== gameId)
+    const newPending = pendingGames.filter(g => g.id !== gameId)
     setCourts(newCourts)
     setPendingGames(newPending)
     saveCourts(newCourts, newPending)
   }
 
   function handleDiscardPending(gameId: string) {
-    const game = pendingGames.find((g) => g.id === gameId)
+    const game = pendingGames.find(g => g.id === gameId)
     if (!game) return
-    const newPending = pendingGames.filter((g) => g.id !== gameId)
-    setQueue((prev) => [...prev, ...getPendingPlayers(game)])
+    const newPending = pendingGames.filter(g => g.id !== gameId)
+    setQueue(prev => [...prev, ...getPendingPlayers(game)])
     setPendingGames(newPending)
     saveCourts(courts, newPending)
   }
 
   function handleAssignPendingManual(gameId: string, type: MatchType) {
-    const game = pendingGames.find((g) => g.id === gameId)
+    const game = pendingGames.find(g => g.id === gameId)
     if (!game || getPendingPlayers(game).length > 0) return
-    const four = pickGroup(activeQueue, history, type)
+    const four = pickGroup(activeQueue, type, pairCount, playCount)
     if (!four) return
-    const usedIds = new Set(four.map((p) => p.memberId))
-    const newPending = pendingGames.map((g) =>
+    const usedIds    = new Set(four.map(p => p.memberId))
+    const newPending = pendingGames.map(g =>
       g.id !== gameId ? g : { ...g, players: four as (SessionParticipant | null)[] },
     )
     setPendingGames(newPending)
-    setQueue((prev) => prev.filter((p) => !usedIds.has(p.memberId)))
+    setQueue(prev => prev.filter(p => !usedIds.has(p.memberId)))
     saveCourts(courts, newPending)
   }
 
-  // idle 코트 한 개 비우기 → 대기열로 반환
   function handleClearCourt(courtIndex: number) {
     const court = courts[courtIndex]
     if (court.status === "playing") return
     const returned = getCourtPlayers(court)
     if (returned.length === 0) return
     const newCourts = courts.map((c, i) =>
-      i === courtIndex ? { ...c, players: [null, null, null, null] as (SessionParticipant | null)[] } : c,
+      i === courtIndex ? { ...c, players: [null, null, null, null] as (SessionParticipant | null)[], startedAt: null } : c,
     )
     setCourts(newCourts)
-    setQueue((prev) => [...prev, ...returned])
+    setQueue(prev => [...prev, ...returned])
     saveCourts(newCourts)
   }
 
-  // ── 선수 피커 (court + pending 공용) ───────────────────────────────────────
+  // ── 선수 피커 ──────────────────────────────────────────────────────────────
 
   function handlePickPlayer(player: SessionParticipant) {
     if (!activeSlot) return
 
     if (activeSlot.target === "court") {
       const { courtIndex, position } = activeSlot
-      const newCourts = courts.map((c) => ({ ...c, players: [...c.players] }))
+      const newCourts = courts.map(c => ({ ...c, players: [...c.players] }))
       newCourts[courtIndex].players[position] = player
       setCourts(newCourts)
       saveCourts(newCourts)
     } else {
       const { gameId, position } = activeSlot
-      const newPending = pendingGames.map((g) =>
-        g.id !== gameId ? g : { ...g, players: g.players.map((p, i) => (i === position ? player : p)) },
+      const newPending = pendingGames.map(g =>
+        g.id !== gameId ? g : { ...g, players: g.players.map((p, i) => i === position ? player : p) },
       )
       setPendingGames(newPending)
       saveCourts(courts, newPending)
     }
-
-    setQueue((prev) => prev.filter((p) => p.memberId !== player.memberId))
+    setQueue(prev => prev.filter(p => p.memberId !== player.memberId))
     setActiveSlot(null)
   }
 
@@ -470,63 +573,53 @@ export function SessionPlay({ session, playStatuses = {}, courtUpdate, onNavigat
 
   function handleAddGuest(name: string, gender: Gender, level: BadmintonLevel) {
     const guest: SessionParticipant = {
-      memberId: `guest-${crypto.randomUUID()}`,
-      memberName: name,
+      memberId:       `guest-${crypto.randomUUID()}`,
+      memberName:     name,
       gender,
       level,
-      reservedAt: new Date().toISOString(),
-      status: "confirmed",
+      reservedAt:     new Date().toISOString(),
+      status:         "confirmed",
       usedFreeTicket: false,
     }
-    setQueue((prev) => [...prev, guest])
+    setQueue(prev => [...prev, guest])
     setShowGuestModal(false)
   }
 
-  // ── 자동 배정 (전체) ────────────────────────────────────────────────────────
+  // ── 자동 배정 ──────────────────────────────────────────────────────────────
 
   function handleAutoAssign(type: MatchType = "free") {
-    let currentQueue     = [...activeQueue]
-    const newCourts      = courts.map((c) => ({ ...c, players: [...c.players] }))
-    const newPending     = [...pendingGames]
-    const currentHistory = [...history]
+    let currentQueue = [...activeQueue]
+    const newCourts  = courts.map(c => ({ ...c, players: [...c.players] }))
+    const newPending = [...pendingGames]
 
-    // 1. 빈 코트 먼저 채우기
+    // 1. 빈 코트 채우기
     for (let i = 0; i < newCourts.length; i++) {
       const court = newCourts[i]
-      if (court.status === "playing") continue
-      const emptyCount = 4 - getCourtPlayers(court).length
-      if (emptyCount === 0) continue
+      if (court.status === "playing" || getCourtPlayers(court).length > 0) continue
+      const four = pickGroup(currentQueue, type, pairCount, playCount)
+      if (!four) continue
+      court.players = balanceTeams(four) as (SessionParticipant | null)[]
+      const usedIds = new Set(four.map(p => p.memberId))
+      currentQueue  = currentQueue.filter(p => !usedIds.has(p.memberId))
+    }
 
-      if (emptyCount === 4) {
-        const four = pickGroup(currentQueue, currentHistory, type)
-        if (!four) continue
-        court.players = balanceTeams(four) as (SessionParticipant | null)[]
-        const usedIds = new Set(four.map((p) => p.memberId))
-        currentQueue  = currentQueue.filter((p) => !usedIds.has(p.memberId))
-      } else {
-        for (let j = 0; j < 4; j++) {
-          if (!court.players[j] && currentQueue.length > 0) {
-            court.players[j] = currentQueue.shift()!
-          }
-        }
+    // 2. 대기 게임 생성 (풀오토 모드에서는 생략)
+    if (mode !== "full-auto") {
+      while (newPending.length < session.courtCount) {
+        const four = pickGroup(currentQueue, type, pairCount, playCount)
+        if (!four) break
+        newPending.push({ id: crypto.randomUUID(), players: four as (SessionParticipant | null)[] })
+        const usedIds = new Set(four.map(p => p.memberId))
+        currentQueue  = currentQueue.filter(p => !usedIds.has(p.memberId))
       }
     }
 
-    // 2. 남은 인원으로 대기 게임 생성 (최대 코트 수)
-    while (newPending.length < session.courtCount) {
-      const four = pickGroup(currentQueue, currentHistory, type)
-      if (!four) break
-      newPending.push({ id: crypto.randomUUID(), players: four as (SessionParticipant | null)[] })
-      const usedIds = new Set(four.map((p) => p.memberId))
-      currentQueue  = currentQueue.filter((p) => !usedIds.has(p.memberId))
-    }
-
-    // 휴식/종료 인원은 배정하지 않고 queue에 유지
-    const inactiveInQueue = queue.filter((p) => !isActivePlayer(p))
+    const inactiveInQueue = queue.filter(p => !isActivePlayer(p))
+    const usedPending     = mode === "full-auto" ? pendingGames : newPending
     setCourts(newCourts)
-    setPendingGames(newPending)
+    setPendingGames(usedPending)
     setQueue([...currentQueue, ...inactiveInQueue])
-    saveCourts(newCourts, newPending)
+    saveCourts(newCourts, usedPending)
   }
 
   // ── 코트 단건 수동 배정 ────────────────────────────────────────────────────
@@ -534,14 +627,14 @@ export function SessionPlay({ session, playStatuses = {}, courtUpdate, onNavigat
   function handleAssignCourt(courtIndex: number, type: MatchType) {
     const court = courts[courtIndex]
     if (court.status === "playing" || getCourtPlayers(court).length > 0) return
-    const four = pickGroup(activeQueue, history, type)
+    const four = pickGroup(activeQueue, type, pairCount, playCount)
     if (!four) return
     const newCourts = courts.map((c, i) =>
       i === courtIndex ? { ...c, players: balanceTeams(four) as (SessionParticipant | null)[] } : c,
     )
-    const usedIds = new Set(four.map((p) => p.memberId))
+    const usedIds = new Set(four.map(p => p.memberId))
     setCourts(newCourts)
-    setQueue((prev) => prev.filter((p) => !usedIds.has(p.memberId)))
+    setQueue(prev => prev.filter(p => !usedIds.has(p.memberId)))
     saveCourts(newCourts)
   }
 
@@ -550,7 +643,7 @@ export function SessionPlay({ session, playStatuses = {}, courtUpdate, onNavigat
   const pickerTitle = activeSlot
     ? activeSlot.target === "court"
       ? `${activeSlot.courtIndex + 1}번 코트 · 선수 선택`
-      : `대기 게임 ${pendingGames.findIndex((g) => g.id === activeSlot.gameId) + 1} · 선수 선택`
+      : `대기 게임 ${pendingGames.findIndex(g => g.id === activeSlot.gameId) + 1} · 선수 선택`
     : ""
 
   return (
@@ -572,7 +665,7 @@ export function SessionPlay({ session, playStatuses = {}, courtUpdate, onNavigat
           </div>
           {history.length > 0 && (
             <button
-              onClick={() => setShowHistory((v) => !v)}
+              onClick={() => setShowHistory(v => !v)}
               className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
             >
               <History className="size-3.5" />
@@ -593,42 +686,40 @@ export function SessionPlay({ session, playStatuses = {}, courtUpdate, onNavigat
       {/* 모드 토글 */}
       <div className="flex items-center justify-between rounded-xl border border-border bg-card px-4 py-3">
         <div>
-          <p className="text-sm font-semibold">{autoMode ? "Auto 모드" : "수동 모드"}</p>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            {autoMode ? "전체 코트 자동 배정" : "각 코트에서 방식 선택"}
-          </p>
+          <p className="text-sm font-semibold">{MODE_LABELS[mode]}</p>
+          <p className="text-xs text-muted-foreground mt-0.5">{MODE_DESCS[mode]}</p>
         </div>
-        <div className="flex items-center gap-3">
-          {autoMode && (
-            <Button
-              size="sm"
-              onClick={() => handleAutoAssign("free")}
-              disabled={!canAutoAssign}
-            >
+        <div className="flex items-center gap-2">
+          {mode !== "manual" && (
+            <Button size="sm" onClick={() => handleAutoAssign("free")} disabled={!canAutoAssign}>
               <Zap className="size-3.5 mr-1" />
               {canAutoAssign ? "자동 배정" : "대기자 부족"}
             </Button>
           )}
-          <button
-            onClick={() => setAutoMode((v) => !v)}
-            className={cn(
-              "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors",
-              autoMode ? "bg-primary" : "bg-muted-foreground/30",
-            )}
-          >
-            <span className={cn(
-              "inline-block h-4 w-4 rounded-full bg-white shadow transition-transform",
-              autoMode ? "translate-x-6" : "translate-x-1",
-            )} />
-          </button>
+          <div className="flex overflow-hidden rounded-lg border border-border">
+            {(["manual", "auto", "full-auto"] as PlayMode[]).map(m => (
+              <button
+                key={m}
+                onClick={() => setMode(m)}
+                className={cn(
+                  "px-2.5 py-1.5 text-xs font-medium transition-colors",
+                  mode === m
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {MODE_SHORT[m]}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
       {/* 모바일 통계 */}
       <div className="grid grid-cols-3 gap-2 md:hidden">
         {[
-          { label: "경기 중", value: `${playingCount}명` },
-          { label: "대기 중", value: `${queue.length}명` },
+          { label: "경기 중",  value: `${playingCount}명` },
+          { label: "대기 중",  value: `${queue.length}명` },
           { label: "완료 게임", value: `${totalGameCount}게임` },
         ].map(({ label, value }) => (
           <div key={label} className="flex flex-col items-center rounded-xl bg-muted py-2.5 gap-0.5">
@@ -638,7 +729,7 @@ export function SessionPlay({ session, playStatuses = {}, courtUpdate, onNavigat
         ))}
       </div>
 
-      {/* 태블릿: 좌우 분할 / 모바일: 세로 */}
+      {/* 메인 레이아웃 */}
       <div className="flex flex-col gap-4 md:flex-row md:items-start md:gap-5">
 
         {/* 좌측: 코트 + 대기 게임 */}
@@ -651,12 +742,12 @@ export function SessionPlay({ session, playStatuses = {}, courtUpdate, onNavigat
                 key={i}
                 courtNumber={i + 1}
                 court={court}
-                manualMode={!autoMode}
-                onSlotClick={(pos) => handleSlotClick(i, pos)}
+                manualMode={mode === "manual"}
+                onSlotClick={pos => handleSlotClick(i, pos)}
                 onGameStart={() => handleGameStart(i)}
                 onGameEnd={() => handleGameEnd(i)}
                 onClear={() => handleClearCourt(i)}
-                onManualAssign={(type) => handleAssignCourt(i, type)}
+                onManualAssign={type => handleAssignCourt(i, type)}
                 canAssignType={canAssignType}
               />
             ))}
@@ -681,10 +772,9 @@ export function SessionPlay({ session, playStatuses = {}, courtUpdate, onNavigat
                 </button>
               )}
             </div>
-
             {pendingGames.length === 0 ? (
               <div className="flex items-center justify-center rounded-xl border border-dashed border-border py-6 text-sm text-muted-foreground">
-                자동 배정하거나 직접 추가하세요
+                {mode === "full-auto" ? "코트 종료 시 자동 배정됩니다" : "자동 배정하거나 직접 추가하세요"}
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -694,18 +784,17 @@ export function SessionPlay({ session, playStatuses = {}, courtUpdate, onNavigat
                     game={game}
                     index={i}
                     canAssign={hasIdleCourt && getPendingPlayers(game).length === 4}
-                    manualMode={!autoMode}
-                    onSlotClick={(pos) => handlePendingSlotClick(game.id, pos)}
+                    manualMode={mode === "manual"}
+                    onSlotClick={pos => handlePendingSlotClick(game.id, pos)}
                     onAssign={() => handleAssignPending(game.id)}
                     onDiscard={() => handleDiscardPending(game.id)}
-                    onManualAssign={(type) => handleAssignPendingManual(game.id, type)}
+                    onManualAssign={type => handleAssignPendingManual(game.id, type)}
                     canAssignType={canAssignType}
                   />
                 ))}
               </div>
             )}
           </div>
-
         </div>
 
         {/* 우측: 대기열 + 기록 */}
@@ -751,20 +840,26 @@ export function SessionPlay({ session, playStatuses = {}, courtUpdate, onNavigat
             <section className="rounded-xl border border-border bg-card p-4">
               <h2 className="mb-3 font-semibold text-sm">게임 기록</h2>
               <div className="flex flex-col gap-1.5 max-h-64 overflow-y-auto">
-                {[...history].reverse().map((g) => (
+                {[...history].reverse().map(g => (
                   <div key={g.gameNumber} className="rounded-lg bg-muted px-3 py-2 text-xs">
-                    <span className="font-medium">게임 {g.gameNumber} · {g.courtNumber}번 코트</span>
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium">게임 {g.gameNumber} · {g.courtNumber}번 코트</span>
+                      {g.duration != null && (
+                        <span className="text-muted-foreground">
+                          {Math.floor(g.duration / 60)}분 {g.duration % 60}초
+                        </span>
+                      )}
+                    </div>
                     <p className="mt-0.5 text-muted-foreground">{g.playerNames.join(" · ")}</p>
                   </div>
                 ))}
               </div>
             </section>
           )}
-
         </div>
       </div>
 
-      {/* 선수 선택 모달 (코트 + 대기 게임 공용) */}
+      {/* 선수 선택 모달 */}
       {activeSlot && (
         <PlayerPicker
           title={pickerTitle}
@@ -788,6 +883,19 @@ export function SessionPlay({ session, playStatuses = {}, courtUpdate, onNavigat
 
 // ─── 서브 컴포넌트 ────────────────────────────────────────────────────────────
 
+function GameTimer({ startedAt }: { startedAt: number }) {
+  const [elapsed, setElapsed] = useState(() => Math.floor((Date.now() - startedAt) / 1000))
+
+  useEffect(() => {
+    const id = setInterval(() => setElapsed(Math.floor((Date.now() - startedAt) / 1000)), 1000)
+    return () => clearInterval(id)
+  }, [startedAt])
+
+  const min = String(Math.floor(elapsed / 60)).padStart(2, "0")
+  const sec = String(elapsed % 60).padStart(2, "0")
+  return <span className="font-mono text-xs font-medium tabular-nums text-primary">{min}:{sec}</span>
+}
+
 function CourtCard({
   courtNumber,
   court,
@@ -799,20 +907,20 @@ function CourtCard({
   onManualAssign,
   canAssignType,
 }: {
-  courtNumber: number
-  court: CourtState
-  manualMode: boolean
-  onSlotClick: (position: 0 | 1 | 2 | 3) => void
-  onGameStart: () => void
-  onGameEnd: () => void
-  onClear: () => void
+  courtNumber:    number
+  court:          CourtState
+  manualMode:     boolean
+  onSlotClick:    (position: 0 | 1 | 2 | 3) => void
+  onGameStart:    () => void
+  onGameEnd:      () => void
+  onClear:        () => void
   onManualAssign: (type: MatchType) => void
-  canAssignType: (type: MatchType) => boolean
+  canAssignType:  (type: MatchType) => boolean
 }) {
-  const players    = getCourtPlayers(court)
-  const isPlaying  = court.status === "playing"
-  const isFull     = players.length === 4
-  const isEmpty    = players.length === 0
+  const players   = getCourtPlayers(court)
+  const isPlaying = court.status === "playing"
+  const isFull    = players.length === 4
+  const isEmpty   = players.length === 0
   const showManual = manualMode && !isPlaying && isEmpty
 
   return (
@@ -830,6 +938,9 @@ function CourtCard({
             <span className="rounded-full bg-primary px-2 py-0.5 text-xs font-medium text-primary-foreground">
               경기 중
             </span>
+          )}
+          {isPlaying && court.startedAt != null && (
+            <GameTimer startedAt={court.startedAt} />
           )}
         </div>
         <div className="flex items-center gap-2">
@@ -865,9 +976,8 @@ function CourtCard({
         </div>
       </div>
 
-      {/* 슬롯 그리드 (항상 표시) */}
       <div className="grid grid-cols-2 gap-2 p-3 pb-2">
-        {([0, 1, 2, 3] as const).map((pos) => (
+        {([0, 1, 2, 3] as const).map(pos => (
           <PlayerSlot
             key={pos}
             player={court.players[pos]}
@@ -877,10 +987,9 @@ function CourtCard({
         ))}
       </div>
 
-      {/* 수동 모드: 빈 코트에 빠른 배정 버튼 */}
       {showManual && (
         <div className="grid grid-cols-4 gap-1.5 px-3 pb-3">
-          {(["free", "mixed", "male", "female"] as MatchType[]).map((type) => {
+          {(["free", "mixed", "male", "female"] as MatchType[]).map(type => {
             const ok = canAssignType(type)
             return (
               <button
@@ -915,13 +1024,13 @@ function PendingGameCard({
   onManualAssign,
   canAssignType,
 }: {
-  game: PendingGame
-  index: number
-  canAssign: boolean
-  manualMode: boolean
-  onSlotClick: (position: 0 | 1 | 2 | 3) => void
-  onAssign: () => void
-  onDiscard: () => void
+  game:          PendingGame
+  index:         number
+  canAssign:     boolean
+  manualMode:    boolean
+  onSlotClick:   (position: 0 | 1 | 2 | 3) => void
+  onAssign:      () => void
+  onDiscard:     () => void
   onManualAssign: (type: MatchType) => void
   canAssignType: (type: MatchType) => boolean
 }) {
@@ -945,16 +1054,13 @@ function PendingGameCard({
           >
             {filledCount < 4 ? `${filledCount}/4명` : "코트 배정"}
           </button>
-          <button
-            onClick={onDiscard}
-            className="text-muted-foreground transition-colors hover:text-foreground"
-          >
+          <button onClick={onDiscard} className="text-muted-foreground transition-colors hover:text-foreground">
             <X className="size-3.5" />
           </button>
         </div>
       </div>
       <div className="grid grid-cols-2 gap-2 p-3 pb-2">
-        {([0, 1, 2, 3] as const).map((pos) => (
+        {([0, 1, 2, 3] as const).map(pos => (
           <PlayerSlot
             key={pos}
             player={game.players[pos]}
@@ -965,7 +1071,7 @@ function PendingGameCard({
       </div>
       {manualMode && isEmpty && (
         <div className="grid grid-cols-4 gap-1.5 px-3 pb-3">
-          {(["free", "mixed", "male", "female"] as MatchType[]).map((type) => {
+          {(["free", "mixed", "male", "female"] as MatchType[]).map(type => {
             const ok = canAssignType(type)
             return (
               <button
@@ -989,14 +1095,10 @@ function PendingGameCard({
   )
 }
 
-function PlayerSlot({
-  player,
-  onClick,
-  locked,
-}: {
-  player: SessionParticipant | null
+function PlayerSlot({ player, onClick, locked }: {
+  player:  SessionParticipant | null
   onClick: () => void
-  locked: boolean
+  locked:  boolean
 }) {
   if (!player) {
     return (
@@ -1044,9 +1146,9 @@ function QueueChip({
   playStatus = "active",
   onStatusChange,
 }: {
-  player: SessionParticipant
-  position: number
-  playStatus?: "active" | "resting" | "done"
+  player:         SessionParticipant
+  position:       number
+  playStatus?:    "active" | "resting" | "done"
   onStatusChange?: () => void
 }) {
   const isMale    = player.gender === "male"
@@ -1077,16 +1179,13 @@ function QueueChip({
   )
 }
 
-function GuestAddSheet({
-  onAdd,
-  onClose,
-}: {
-  onAdd: (name: string, gender: Gender, level: BadmintonLevel) => void
+function GuestAddSheet({ onAdd, onClose }: {
+  onAdd:  (name: string, gender: Gender, level: BadmintonLevel) => void
   onClose: () => void
 }) {
-  const [name, setName] = useState("")
+  const [name,   setName]   = useState("")
   const [gender, setGender] = useState<Gender>("male")
-  const [level, setLevel] = useState<BadmintonLevel>("B")
+  const [level,  setLevel]  = useState<BadmintonLevel>("B")
 
   return (
     <>
@@ -1100,13 +1199,13 @@ function GuestAddSheet({
               type="text"
               placeholder="이름"
               value={name}
-              onChange={(e) => setName(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && name.trim() && onAdd(name.trim(), gender, level)}
+              onChange={e => setName(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && name.trim() && onAdd(name.trim(), gender, level)}
               autoFocus
               className="w-full rounded-xl border border-border bg-muted/50 px-4 py-3 text-sm outline-none focus:border-primary"
             />
             <div className="flex gap-2">
-              {(["male", "female"] as Gender[]).map((g) => (
+              {(["male", "female"] as Gender[]).map(g => (
                 <button
                   key={g}
                   onClick={() => setGender(g)}
@@ -1124,7 +1223,7 @@ function GuestAddSheet({
               ))}
             </div>
             <div className="flex gap-2">
-              {(["S", "A", "B", "C", "D"] as BadmintonLevel[]).map((l) => (
+              {(["S", "A", "B", "C", "D"] as BadmintonLevel[]).map(l => (
                 <button
                   key={l}
                   onClick={() => setLevel(l)}
@@ -1147,18 +1246,12 @@ function GuestAddSheet({
   )
 }
 
-function PlayerPicker({
-  title,
-  queue,
-  playStatuses,
-  onPick,
-  onClose,
-}: {
-  title: string
-  queue: SessionParticipant[]
+function PlayerPicker({ title, queue, playStatuses, onPick, onClose }: {
+  title:        string
+  queue:        SessionParticipant[]
   playStatuses: PlayStatusMap
-  onPick: (player: SessionParticipant) => void
-  onClose: () => void
+  onPick:       (player: SessionParticipant) => void
+  onClose:      () => void
 }) {
   return (
     <>
@@ -1171,11 +1264,11 @@ function PlayerPicker({
             <p className="py-6 text-center text-sm text-muted-foreground">대기 중인 선수 없음</p>
           ) : (
             <div className="flex flex-col gap-2">
-              {queue.map((p) => {
-                const isMale      = p.gender === "male"
-                const ps          = isGuest(p) ? "active" : (playStatuses[p.memberId] ?? "active")
-                const isResting   = ps === "resting"
-                const isDone      = ps === "done"
+              {queue.map(p => {
+                const isMale    = p.gender === "male"
+                const ps        = isGuest(p) ? "active" : (playStatuses[p.memberId] ?? "active")
+                const isResting = ps === "resting"
+                const isDone    = ps === "done"
                 return (
                   <button
                     key={p.memberId}

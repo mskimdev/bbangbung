@@ -53,6 +53,7 @@ export interface CourtSlotApi {
   courtNumber: number
   status: "idle" | "playing" | "pending"
   slots: (string | null)[]  // 4 elements — member IDs, null for empty
+  startedAt?: number | null  // Unix ms timestamp, null if not started
 }
 
 export interface Reservation {
