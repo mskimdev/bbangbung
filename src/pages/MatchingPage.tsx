@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { ChevronLeft } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { LEVEL_COLORS, formatDate, formatTime } from "@/lib/badminton"
@@ -238,6 +238,20 @@ export function MatchingPage({ session, currentUserId, onNavigate }: MatchingPag
   )
 }
 
+function GameTimer({ startedAt }: { startedAt: number }) {
+  const [elapsed, setElapsed] = useState(() => Math.floor((Date.now() - startedAt) / 1000))
+  const idRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  useEffect(() => {
+    idRef.current = setInterval(() => setElapsed(Math.floor((Date.now() - startedAt) / 1000)), 1000)
+    return () => { if (idRef.current) clearInterval(idRef.current) }
+  }, [startedAt])
+
+  const min = String(Math.floor(elapsed / 60)).padStart(2, "0")
+  const sec = String(elapsed % 60).padStart(2, "0")
+  return <span className="font-mono text-xs font-medium tabular-nums text-primary">{min}:{sec}</span>
+}
+
 function CourtView({
   court,
   byId,
@@ -274,6 +288,9 @@ function CourtView({
             <span className="rounded-full bg-primary/20 px-2 py-0.5 text-xs font-medium text-primary">
               경기 중
             </span>
+          )}
+          {isPlaying && court.startedAt != null && (
+            <GameTimer startedAt={court.startedAt} />
           )}
         </div>
         <span className="text-xs text-muted-foreground">{filled}명</span>
