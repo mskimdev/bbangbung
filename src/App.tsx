@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react"
-import type { PlayStatusMap } from "@/types"
+import type { CourtSlotApi, PlayStatusMap } from "@/types"
 import { playStatusApi } from "@/lib/api"
 import { Navbar } from "@/components/layout/Navbar"
 import { Auth } from "@/pages/Auth"
@@ -23,6 +23,7 @@ import { useSessionSse } from "@/hooks/useSessionSse"
 export default function App() {
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [playStatuses, setPlayStatuses] = useState<PlayStatusMap>({})
+  const [latestCourtUpdate, setLatestCourtUpdate] = useState<CourtSlotApi[] | null>(null)
 
   const { page, previousPage, selectedSessionId, setSelectedSessionId, navigate, resetNavigation } = useNavigation()
   const { toast, showToast, hideToast } = useToast()
@@ -85,6 +86,7 @@ export default function App() {
       if (sseSessionId) refreshSession(sseSessionId)
     },
     setPlayStatuses,
+    setLatestCourtUpdate,
   )
 
   async function handleLogoutAndReset() {
@@ -149,7 +151,7 @@ export default function App() {
           <MatchingPagePreview />
         )}
         {page === "session-play" && selectedSession && (
-          <SessionPlay session={selectedSession} playStatuses={playStatuses} onNavigate={navigate} />
+          <SessionPlay session={selectedSession} playStatuses={playStatuses} courtUpdate={latestCourtUpdate} onNavigate={navigate} />
         )}
         {page === "my-reservations" && (
           <MyReservations reservations={reservations} onNavigate={navigate} onCancel={handleCancel} />

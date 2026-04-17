@@ -64,12 +64,13 @@ export function useAuth(showToast: ShowToast) {
     showToast("로그아웃 되었습니다.")
   }
 
-  async function handleUpdateProfile(updated: Pick<Member, "level" | "phone">) {
+  async function handleUpdateProfile(updated: Pick<Member, "level" | "phone" | "birthdate">) {
     if (!currentUser) return
     try {
       const { data: m } = await api.patch(`/members/${currentUser.id}`, {
         level: updated.level,
         phone: updated.phone,
+        birthdate: updated.birthdate,
       })
       const next = mapMember(m)
       setCurrentUser(next)

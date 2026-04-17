@@ -3,7 +3,7 @@ import { Sun, Moon, Monitor } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { PasswordInput } from "@/components/ui/password-input"
 import { Toast } from "@/components/ui/toast"
-import { cn, formatPhone } from "@/lib/utils"
+import { cn, formatPhone, formatBirthdate, birthdateToISO } from "@/lib/utils"
 import { useToast } from "@/hooks/useToast"
 import { useTheme } from "@/components/theme-provider"
 import { LEVEL_COLORS } from "@/lib/badminton"
@@ -13,7 +13,7 @@ const LEVELS: BadmintonLevel[] = ["S", "A", "B", "C", "D"]
 
 interface MyProfileProps {
   currentUser: Member
-  onUpdate: (updated: Pick<Member, "level" | "phone">) => void
+  onUpdate: (updated: Pick<Member, "level" | "phone" | "birthdate">) => void
   onChangePassword: (currentPassword: string, newPassword: string) => Promise<void>
   onLogout: () => void
 }
@@ -21,6 +21,7 @@ interface MyProfileProps {
 interface ProfileState {
   level: BadmintonLevel
   phone: string
+  birthdate: string
   infoError: string
   currentPw: string
   newPw: string
@@ -34,6 +35,7 @@ interface ProfileState {
 type ProfileAction =
   | { type: "SET_LEVEL"; level: BadmintonLevel }
   | { type: "SET_PHONE"; phone: string }
+  | { type: "SET_BIRTHDATE"; birthdate: string }
   | { type: "SET_INFO_ERROR"; error: string }
   | { type: "SET_CURRENT_PW"; value: string }
   | { type: "SET_NEW_PW"; value: string }
@@ -48,6 +50,7 @@ function profileReducer(state: ProfileState, action: ProfileAction): ProfileStat
   switch (action.type) {
     case "SET_LEVEL":       return { ...state, level: action.level }
     case "SET_PHONE":       return { ...state, phone: action.phone }
+    case "SET_BIRTHDATE":   return { ...state, birthdate: action.birthdate }
     case "SET_INFO_ERROR":  return { ...state, infoError: action.error }
     case "SET_CURRENT_PW":  return { ...state, currentPw: action.value }
     case "SET_NEW_PW":      return { ...state, newPw: action.value }
@@ -68,6 +71,7 @@ export function MyProfile({ currentUser, onUpdate, onChangePassword, onLogout }:
   const [state, dispatch] = useReducer(profileReducer, {
     level: currentUser.level,
     phone: currentUser.phone,
+    birthdate: currentUser.birthdate.replace(/-/g, "."),  // "2001-01-12" → "2001.01.12"
     infoError: "",
     currentPw: "",
     newPw: "",
@@ -78,15 +82,16 @@ export function MyProfile({ currentUser, onUpdate, onChangePassword, onLogout }:
     pwError: "",
   })
 
-  const { level, phone, infoError, currentPw, newPw, confirmPw, showCur, showNew, showCon, pwError } = state
-  const isInfoDirty = level !== currentUser.level || phone !== currentUser.phone
+  const { level, phone, birthdate, infoError, currentPw, newPw, confirmPw, showCur, showNew, showCon, pwError } = state
+  const isInfoDirty = level !== currentUser.level || phone !== currentUser.phone || birthdate !== currentUser.birthdate.replace(/-/g, ".")
 
   async function handleInfoSave() {
     dispatch({ type: "SET_INFO_ERROR", error: "" })
     if (!phone.trim()) { dispatch({ type: "SET_INFO_ERROR", error: "전화번호를 입력해주세요." }); return }
+    if (!birthdate) { dispatch({ type: "SET_INFO_ERROR", error: "생년월일을 입력해주세요." }); return }
     setInfoLoading(true)
     try {
-      await onUpdate({ level, phone: phone.trim() })
+      await onUpdate({ level, phone: phone.trim(), birthdate: birthdateToISO(birthdate) })
     } catch {
       dispatch({ type: "SET_INFO_ERROR", error: "저장에 실패했습니다." })
     } finally {
@@ -115,9 +120,8 @@ export function MyProfile({ currentUser, onUpdate, onChangePassword, onLogout }:
 
       {/* 읽기 전용 */}
       <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4">
-        <Row label="이름"     value={currentUser.name} />
-        <Row label="생년월일" value={currentUser.birthdate.replace(/-/g, ".")} />
-        <Row label="성별"     value={currentUser.gender === "male" ? "남성" : "여성"} />
+        <Row label="이름" value={currentUser.name} />
+        <Row label="성별" value={currentUser.gender === "male" ? "남성" : "여성"} />
         {currentUser.isAdmin && <Row label="권한" value="관리자" highlight />}
       </div>
 
@@ -181,6 +185,18 @@ export function MyProfile({ currentUser, onUpdate, onChangePassword, onLogout }:
               >{l}</button>
             ))}
           </div>
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <label className="text-sm font-medium">생년월일</label>
+          <input
+            type="text"
+            inputMode="numeric"
+            placeholder="20010112"
+            value={birthdate}
+            onChange={(e) => dispatch({ type: "SET_BIRTHDATE", birthdate: formatBirthdate(e.target.value) })}
+            className={inputClass}
+          />
         </div>
 
         <div className="flex flex-col gap-2">

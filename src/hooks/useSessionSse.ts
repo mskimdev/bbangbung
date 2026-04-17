@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react"
-import type { BbangSession, PlayStatusMap, SessionParticipant } from "@/types"
+import type { BbangSession, CourtSlotApi, PlayStatusMap, SessionParticipant } from "@/types"
 
 const BASE_URL = (import.meta.env.VITE_API_URL ?? "http://localhost:8080") + "/api"
 
@@ -38,6 +38,7 @@ export function useSessionSse(
   onDeleted?: () => void,
   onReconnect?: () => void,
   onPlayStatusUpdate?: (statuses: PlayStatusMap) => void,
+  onCourtUpdate?: (courts: CourtSlotApi[]) => void,
 ) {
   const onUpdateRef = useRef(onUpdate)
   onUpdateRef.current = onUpdate
@@ -47,6 +48,8 @@ export function useSessionSse(
   onReconnectRef.current = onReconnect
   const onPlayStatusUpdateRef = useRef(onPlayStatusUpdate)
   onPlayStatusUpdateRef.current = onPlayStatusUpdate
+  const onCourtUpdateRef = useRef(onCourtUpdate)
+  onCourtUpdateRef.current = onCourtUpdate
 
   useEffect(() => {
     if (!sessionId) return
@@ -89,6 +92,14 @@ export function useSessionSse(
       es.addEventListener("play-status-update", (e) => {
         try {
           onPlayStatusUpdateRef.current?.(JSON.parse(e.data) as PlayStatusMap)
+        } catch {
+          // 파싱 실패 시 무시
+        }
+      })
+
+      es.addEventListener("court-update", (e) => {
+        try {
+          onCourtUpdateRef.current?.(JSON.parse(e.data) as CourtSlotApi[])
         } catch {
           // 파싱 실패 시 무시
         }

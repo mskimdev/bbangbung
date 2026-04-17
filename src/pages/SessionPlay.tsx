@@ -1,10 +1,10 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { ChevronLeft, Zap, X, History, Plus, UserPlus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { LEVEL_COLORS, formatDate } from "@/lib/badminton"
-import { courtsApi } from "@/lib/api"
-import type { BadmintonLevel, BbangSession, Gender, Page, PlayStatusMap, SessionParticipant } from "@/types"
+import { courtsApi, playStatusApi } from "@/lib/api"
+import type { BadmintonLevel, BbangSession, CourtSlotApi, Gender, Page, PlayStatus, PlayStatusMap, SessionParticipant } from "@/types"
 
 // ─── 타입 ────────────────────────────────────────────────────────────────────
 
@@ -143,10 +143,11 @@ function isGuest(player: SessionParticipant) {
 interface SessionPlayProps {
   session: BbangSession
   playStatuses?: PlayStatusMap
+  courtUpdate?: CourtSlotApi[] | null
   onNavigate: (page: Page) => void
 }
 
-export function SessionPlay({ session, playStatuses = {}, onNavigate }: SessionPlayProps) {
+export function SessionPlay({ session, playStatuses = {}, courtUpdate, onNavigate }: SessionPlayProps) {
   const confirmed = session.participants.filter((p) => p.status === "confirmed")
 
   const [courts, setCourts]             = useState<CourtState[]>(() =>
@@ -175,7 +176,10 @@ export function SessionPlay({ session, playStatuses = {}, onNavigate }: SessionP
   const [autoMode, setAutoMode]         = useState(false)
   const [showGuestModal, setShowGuestModal] = useState(false)
 
-  // 마운트 시 저장된 코트 상태 로드
+  // 자신이 저장한 court-update SSE echo를 무시하기 위한 플래그
+  const ownSaveRef = useRef(false)
+
+  // 마운트 시 저장된 코트 상태 로드 (이슈 4: 대기 게임도 복원)
   useEffect(() => {
     courtsApi.get(session.id).then((res) => {
       if (res.data.length === 0) return
@@ -192,11 +196,19 @@ export function SessionPlay({ session, playStatuses = {}, onNavigate }: SessionP
           players: c.slots.map((id) => (id ? (byId[id] ?? null) : null)) as (SessionParticipant | null)[],
         }
       })
-      // pending(courtNumber > courtCount)은 대기열 계산에서만 제외, courts 배열엔 포함 안 함
+      // 대기 게임 복원 (courtNumber > courtCount)
+      const loadedPending = res.data
+        .filter((c) => c.courtNumber > session.courtCount)
+        .map((c) => ({
+          id: crypto.randomUUID(),
+          players: c.slots.map((id) => (id ? (byId[id] ?? null) : null)) as (SessionParticipant | null)[],
+        }))
+      // 코트 + 대기 게임에 배정된 전체 선수를 대기열에서 제외
       const onCourtIds = new Set(
-        res.data.filter((c) => c.courtNumber <= session.courtCount).flatMap((c) => c.slots.filter(Boolean))
+        res.data.flatMap((c) => c.slots.filter(Boolean) as string[])
       )
       setCourts(loadedCourts)
+      setPendingGames(loadedPending)
       setQueue(allConfirmed.filter((p) => !onCourtIds.has(p.memberId)))
     }).catch(() => {})
   }, [session.id]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -214,8 +226,43 @@ export function SessionPlay({ session, playStatuses = {}, onNavigate }: SessionP
       status: "pending" as const,
       slots: g.players.map((p) => (p && !isGuest(p)) ? p.memberId : null),
     }))
+    // 자신이 보낸 SSE echo를 무시하기 위해 2초간 플래그 설정
+    ownSaveRef.current = true
+    setTimeout(() => { ownSaveRef.current = false }, 2000)
     courtsApi.update(session.id, [...courtPayload, ...pendingPayload]).catch(() => {})
   }
+
+  // 이슈 3: 다른 관리자의 코트 변경 실시간 반영 (자신의 저장 echo는 무시)
+  useEffect(() => {
+    if (!courtUpdate || ownSaveRef.current) return
+    const allConfirmed = session.participants.filter((p) => p.status === "confirmed")
+    const byId = Object.fromEntries(allConfirmed.map((p) => [p.memberId, p]))
+
+    const newCourts = Array.from({ length: session.courtCount }, (_, i) => {
+      const c = courtUpdate.find((x) => x.courtNumber === i + 1)
+      if (!c) return { status: "idle" as const, players: [null, null, null, null] as (SessionParticipant | null)[] }
+      return {
+        status: c.status as "idle" | "playing",
+        players: c.slots.map((id) => (id ? (byId[id] ?? null) : null)) as (SessionParticipant | null)[],
+      }
+    })
+
+    const newPending = courtUpdate
+      .filter((c) => c.courtNumber > session.courtCount)
+      .map((c) => ({
+        id: crypto.randomUUID(),
+        players: c.slots.map((id) => (id ? (byId[id] ?? null) : null)) as (SessionParticipant | null)[],
+      }))
+
+    const assignedIds = new Set(courtUpdate.flatMap((c) => c.slots.filter(Boolean) as string[]))
+
+    setCourts(newCourts)
+    setPendingGames(newPending)
+    setQueue((prev) => [
+      ...allConfirmed.filter((p) => !assignedIds.has(p.memberId)),
+      ...prev.filter((p) => isGuest(p)),  // 게스트는 대기열에 유지
+    ])
+  }, [courtUpdate]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // 휴식/종료 참가자는 자동 배정에서 제외
   function isActivePlayer(player: SessionParticipant): boolean {
@@ -224,6 +271,14 @@ export function SessionPlay({ session, playStatuses = {}, onNavigate }: SessionP
     return !s || s === "active"
   }
   const activeQueue = queue.filter(isActivePlayer)
+
+  // 이슈 1: 관리자가 대기열에서 참가자 플레이 상태 변경 (탭으로 순환)
+  function handleAdminStatusCycle(player: SessionParticipant) {
+    if (isGuest(player)) return
+    const current: PlayStatus = playStatuses[player.memberId] ?? "active"
+    const next: PlayStatus = current === "active" ? "resting" : current === "resting" ? "done" : "active"
+    playStatusApi.set(session.id, player.memberId, next).catch(() => {})
+  }
 
   const playingCount   = courts.filter((c) => c.status === "playing").reduce((s, c) => s + getCourtPlayers(c).length, 0)
   const totalGameCount = history.length
@@ -659,7 +714,10 @@ export function SessionPlay({ session, playStatuses = {}, onNavigate }: SessionP
           {/* 대기열 */}
           <section className="rounded-xl border border-border bg-card p-4">
             <div className="mb-3 flex items-center justify-between">
-              <h2 className="font-semibold text-sm">대기 중</h2>
+              <div>
+                <h2 className="font-semibold text-sm">대기 중</h2>
+                <p className="text-xs text-muted-foreground mt-0.5">탭하여 상태 변경</p>
+              </div>
               <div className="flex items-center gap-2">
                 <span className="text-xs text-muted-foreground">{queue.length}명</span>
                 <button
@@ -681,6 +739,7 @@ export function SessionPlay({ session, playStatuses = {}, onNavigate }: SessionP
                     player={p}
                     position={i + 1}
                     playStatus={isGuest(p) ? "active" : (playStatuses[p.memberId] ?? "active")}
+                    onStatusChange={isGuest(p) ? undefined : () => handleAdminStatusCycle(p)}
                   />
                 ))}
               </div>
@@ -983,18 +1042,23 @@ function QueueChip({
   player,
   position,
   playStatus = "active",
+  onStatusChange,
 }: {
   player: SessionParticipant
   position: number
   playStatus?: "active" | "resting" | "done"
+  onStatusChange?: () => void
 }) {
   const isMale    = player.gender === "male"
   const isResting = playStatus === "resting"
   const isDone    = playStatus === "done"
   return (
     <div
+      onClick={onStatusChange}
+      title={onStatusChange ? "탭하여 상태 변경 (활성→휴식→종료)" : undefined}
       className={cn(
-        "flex items-center gap-1.5 rounded-full border px-3 py-1",
+        "flex items-center gap-1.5 rounded-full border px-3 py-1 transition-opacity",
+        onStatusChange ? "cursor-pointer hover:opacity-70 active:scale-95" : "",
         isDone    ? "border-border bg-muted opacity-50" :
         isResting ? "border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-900/20" :
         isMale

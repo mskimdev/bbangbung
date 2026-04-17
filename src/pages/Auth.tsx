@@ -2,7 +2,7 @@ import { useState } from "react"
 import bbangbungLogo from "@/assets/bbangbung_logo.png"
 import { Button } from "@/components/ui/button"
 import { PasswordInput } from "@/components/ui/password-input"
-import { cn, formatPhone } from "@/lib/utils"
+import { cn, formatPhone, formatBirthdate, birthdateToISO } from "@/lib/utils"
 import { LEVEL_COLORS } from "@/lib/badminton"
 import { getErrorMessage } from "@/lib/api"
 import type { BadmintonLevel, Gender } from "@/types"
@@ -161,7 +161,7 @@ function SignupForm({
     try {
       await onSignup({
         name: name.trim(),
-        birthdate,
+        birthdate: birthdateToISO(birthdate),
         gender,
         level,
         phone: phone.replace(/-/g, ""),
@@ -183,8 +183,15 @@ function SignupForm({
       </Field>
 
       <Field label="생년월일">
-        <input type="date" value={birthdate} max={new Date().toISOString().slice(0, 10)}
-          onChange={(e) => setBirthdate(e.target.value)} className={inputClass} required />
+        <input
+          type="text"
+          inputMode="numeric"
+          placeholder="20010112"
+          value={birthdate}
+          onChange={(e) => setBirthdate(formatBirthdate(e.target.value))}
+          className={inputClass}
+          required
+        />
       </Field>
 
       <Field label="성별">

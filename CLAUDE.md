@@ -118,6 +118,7 @@ src/main/java/com/web/bbangbungbe/
 │
 ├── service/
 │   ├── MemberService.java           # 회원가입, 로그인, 프로필/비밀번호 수정
+│   ├── PlayStatusStore.java         # 인메모리 플레이 상태 저장소 (ConcurrentHashMap, 에페머럴)
 │   ├── SessionService.java          # 세션 CRUD, 상태 변경 (변경 시 SSE notify)
 │   ├── ReservationService.java      # 예약/대기/취소, 상태 동기화 (upsert) (변경 시 SSE notify)
 │   └── SessionSseService.java       # SseEmitter 관리, 세션별 구독자에게 push
@@ -180,6 +181,7 @@ src/main/java/com/web/bbangbungbe/
 | POST | `/waitlist` | 본인 | 대기 신청 (waitlisted) |
 | DELETE | `/` | 본인 | 예약 취소 |
 | PATCH | `/confirm` | ADMIN | 입금 확인 (pending → confirmed) |
+| PATCH | `/unconfirm` | ADMIN | 입금 취소 (confirmed → pending, 무료권 환불) |
 | PATCH | `/promote` | ADMIN | 대기자 승격 (waitlisted → pending) |
 | DELETE | `/admin` | ADMIN | 강제 취소 |
 
@@ -189,6 +191,12 @@ src/main/java/com/web/bbangbungbe/
 | GET | `/` | 불필요 | 현재 코트 배정 현황 조회 (CourtSlotApi[]) |
 | PUT | `/` | ADMIN | 코트 배정 저장 + SSE `court-update` push |
 
+### 플레이 상태 (`/api/sessions/{id}/play-status`)
+| 메서드 | 경로 | 인증 | 설명 |
+|--------|------|------|------|
+| GET | `/` | 필요 | 세션 전체 플레이 상태 조회 (`Record<memberId, status>`) |
+| PATCH | `/../participants/{memberId}/play-status` | 본인 | 개인 플레이 상태 설정 (`active`/`resting`/`done`) + SSE push |
+
 ---
 
 ## 핵심 타입 (`src/types.ts`)
@@ -196,15 +204,17 @@ src/main/java/com/web/bbangbungbe/
 ```ts
 type BadmintonLevel = "S" | "A" | "B" | "C" | "D"   // S=프로, D=초보
 type Gender = "male" | "female"
-type SessionStatus = "open" | "closed" | "completed" | "cancelled"
+type SessionStatus = "open" | "closed" | "in_progress" | "completed" | "cancelled"
 type ReservationStatus = "confirmed" | "pending" | "waitlisted" | "cancelled"
+type PlayStatus = "active" | "resting" | "done"
+type PlayStatusMap = Record<string, PlayStatus>        // key: memberId
 type Page = "home" | "sessions" | "session-detail" | "session-match" | "session-play" | "my-reservations" | "profile" | "admin"
 
 interface Member { id, name, birthdate, gender, level, phone, password, joinedAt, isAdmin }
 interface BbangSession { id, title, date, startTime, endTime, location, address, courtCount,
                          maxParticipants, currentParticipants, status, levelRestriction,
                          fee, description, organizer, participants: SessionParticipant[] }
-interface SessionParticipant { memberId, memberName, gender, level, reservedAt, status }
+interface SessionParticipant { memberId, memberName, gender, level, reservedAt, status, usedFreeTicket }
 interface Reservation { id, sessionId, sessionTitle, date, startTime, endTime,
                         location, fee, status, createdAt }
 // 코트 슬롯 API 응답/요청 타입
@@ -226,10 +236,12 @@ interface CourtSlotApi { courtNumber: number; status: "idle" | "playing"; slots:
 
 ### 세션 상태 흐름
 ```
-open (모집 중) → closed (모집 마감) → completed (종료)
+open (모집 중) → closed (모집 마감) → in_progress (정모 진행 중) → completed (종료)
 open / closed  → completed (종료 처리)
 closed         → open (모집 재개)
 ```
+> `in_progress` 전환: 관리자가 Admin에서 "정모 시작" 버튼 클릭 시
+> `in_progress` → Home 배너 표시, SessionDetail 코트 현황 버튼 표시, SessionList "마감" 탭에 포함
 
 ---
 
@@ -249,16 +261,21 @@ closed         → open (모집 재개)
 - `handleCreateSession(data, organizerId)` — 세션 생성
 - `handleEditSession(sessionId, data)` — 세션 수정
 - `handleDeleteSession(sessionId)` — 세션 삭제
-- `handleUpdateSessionStatus(sessionId, status)` — 세션 상태 변경
+- `handleUpdateSessionStatus(sessionId, status): Promise<boolean>` — 세션 상태 변경 (Optimistic + rollback)
 - `handleConfirmPayment(sessionId, memberId)` — pending → confirmed
+- `handleUnconfirmPayment(sessionId, memberId)` — confirmed → pending (무료권 환불 포함)
 - `handlePromoteFromWaitlist(sessionId, memberId)` — waitlisted → pending
 - `handleCancelParticipant(sessionId, memberId)` — 관리자 강제 취소
+- `handleConfirmAll(sessionId)` — 전체 pending → confirmed 일괄 처리
 - 모든 함수에 try/catch + showToast 에러 처리
 
 ### `useSessionSse`
-- `sessionId` — null이면 구독 안 함 (page가 session-detail일 때만 활성)
-- `onUpdate(session)` — session-update 이벤트 수신 시 호출
-- `onDeleted()` — session-deleted 이벤트 수신 시 호출 (세션 목록으로 이동 + 토스트)
+- `sessionId` — null이면 구독 안 함
+- `onUpdate(session)` — `session-update` 이벤트 수신 시 호출
+- `onDeleted()` — `session-deleted` 이벤트 수신 시 호출 (세션 목록으로 이동 + 토스트)
+- `onReconnect()` — SSE 재연결 시 `refreshSession` 호출
+- `onPlayStatusUpdate(statuses)` — `play-status-update` 이벤트 수신 시 호출 (PlayStatusMap)
+- 구독 활성: `session-detail`, `admin`, `session-play`, `home`(오늘 세션 있을 때)
 
 ### `useReservations`
 - `fetchReservations()` — 내 예약 API 조회
@@ -298,9 +315,11 @@ closed         → open (모집 재개)
 ### Admin
 - **정모 관리 탭**: 세션 목록 → 세션 상세
   - 세션 상세: 입금 대기 확정/취소, 대기자 입금요청/취소
-  - 상태 변경 버튼 (마감 / 재개 / 종료)
+  - **confirmed 참가자**: "입금 취소" (confirmed→pending) + "취소" (강제 취소) 버튼 추가
+  - 상태 변경 버튼 (마감 / 재개 / 정모 시작 / 종료) — `completed` 세션에서 "정모 진행" 버튼 숨김
   - 수정 버튼 → CreateSession 수정 모드
   - 삭제 버튼 → ConfirmDialog 경유
+  - 세션 선택 시 `App.tsx` `selectedSessionId` 동기화 → SSE 실시간 갱신
   - 모든 액션 버튼 API 호출 중 `loadingId` 로 중복 클릭 방지 (멤버별 개별 비활성화)
 - **회원 관리 탭**: API로 전체 회원 조회, 이름/전화번호 검색, 성별/급수 필터
   - 조회 중 스켈레톤 로딩 표시, 실패 시 에러 토스트
@@ -423,19 +442,37 @@ closed         → open (모집 재개)
       - 대기 게임도 동일하게 `[자유] [혼복] [남복] [여복]` 버튼 + 슬롯 직접 배정
     - `saveCourts(courts, pending)`: 실제 코트(courtNumber 1~N) + 대기게임(courtNumber N+1~)을 함께 저장
     - 마운트 시 API로 상태 복원 — courtNumber 기반으로 실제 코트/대기게임 구분, padding 처리
+    - **플레이 상태 연동** (`playStatuses` prop): 휴식/종료 인원 배지 표시, `activeQueue`에서 제외
+    - PlayerPicker 바텀시트에서 휴식/종료 상태 배지 함께 표시
   - **참가자용 `MatchingPage.tsx`** (`session-match` 페이지)
     - SSE `court-update` 이벤트 구독으로 실시간 반영
     - `courtNumber <= session.courtCount` → 실제 코트, 초과 → 대기 게임 (status 대소문자 무관)
     - 실제 코트 현황 + 대기 게임 섹션 + 대기 중 섹션 (항상 표시, 0명이면 "없음" 메시지)
     - "내 코트" 강조, "나" 배지, 내 슬롯 ring
-  - `Home.tsx` — 오늘 closed 세션 + 내가 confirmed인 경우 "정모 진행 중" 배너 → `session-match` 이동
-  - `SessionDetail.tsx` — "코트 현황 보기 →" 버튼: `status === "closed" && confirmedParticipants.length > 0`
+    - **내 상태 카드**: `[활성] [휴식] [종료]` 버튼으로 본인 플레이 상태 설정 → API + SSE
+  - `Home.tsx` — 오늘 `in_progress` 세션 있으면 "현재 진행 중" 배너 → `session-match`/`session-play` 이동
+  - `SessionDetail.tsx` — "코트 현황 보기 →" 버튼: `status === "in_progress"`
+  - `SessionList.tsx` — "마감" 탭: `closed` + `in_progress` 모두 포함
   - `CourtSlotApi.status`: `"idle" | "playing" | "pending"`
   - **백엔드**: `court_game` 테이블, `CourtGameService`, `CourtGameController`, `SessionSseService.notifyCourts()`
-    - DB: `session_id, court_number, status(VARCHAR20), slot0~slot3_member_id`, UNIQUE `(session_id, court_number)`
+    - DB: `id BIGINT AUTO_INCREMENT PK, session_id, court_number, status(VARCHAR20), slot0~slot3_member_id`, UNIQUE `(session_id, court_number)`
     - `GET /api/sessions/{id}/courts` — permitAll, `PUT` — ADMIN only
     - PUT 시 기존 rows delete + 새로 insert + SSE `court-update` push
     - 대기 게임은 `courtNumber > session.courtCount`로 구분 (별도 테이블 없음)
+- [x] **플레이 상태 기능** (2026-04-16)
+  - `PlayStatusStore.java` — `@Component`, ConcurrentHashMap 기반 인메모리 저장 (에페머럴)
+  - `GET /api/sessions/{id}/play-status` — 전체 플레이 상태 조회 (인증 필요)
+  - `PATCH /api/sessions/{id}/participants/{memberId}/play-status` — 상태 설정 + SSE `play-status-update` push
+  - SSE 이벤트: `play-status-update` — `PlayStatusMap` JSON 전송
+  - `useSessionSse` 5번째 파라미터 `onPlayStatusUpdate` 추가
+  - `App.tsx`: session-play 진입 시 초기 플레이 상태 fetch, 이탈 시 초기화
+- [x] **입금 취소 기능** (2026-04-16)
+  - `ReservationService.unconfirmPayment()` — confirmed → pending, `usedFreeTicket=true`면 무료권 환불
+  - `PATCH /api/reservations/unconfirm` — ADMIN 전용
+  - Admin: confirmed 참가자에 "입금 취소" 버튼 추가
+- [x] **confirmed 참가자 강제 취소** (2026-04-16) — Admin 패널에서 confirmed 참가자도 취소 가능
+- [x] **`in_progress` 세션 상태** (2026-04-16) — `SessionStatus` enum에 추가, MySQL VARCHAR(20), STATUS_CONFIG 배지 추가
+- [x] **JPQL 타입 버그 수정** (2026-04-16) — `ReservationRepository` `String → SessionStatus` 파라미터 타입 변경
 
 ---
 
