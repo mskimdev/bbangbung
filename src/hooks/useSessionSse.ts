@@ -39,6 +39,7 @@ export function useSessionSse(
   onReconnect?: () => void,
   onPlayStatusUpdate?: (statuses: PlayStatusMap) => void,
   onCourtUpdate?: (courts: CourtSlotApi[]) => void,
+  onGameStatsUpdate?: (stats: { history: unknown[]; pairCount: Record<string, number>; playCount: Record<string, number> }) => void,
 ) {
   const onUpdateRef = useRef(onUpdate)
   onUpdateRef.current = onUpdate
@@ -50,6 +51,8 @@ export function useSessionSse(
   onPlayStatusUpdateRef.current = onPlayStatusUpdate
   const onCourtUpdateRef = useRef(onCourtUpdate)
   onCourtUpdateRef.current = onCourtUpdate
+  const onGameStatsUpdateRef = useRef(onGameStatsUpdate)
+  onGameStatsUpdateRef.current = onGameStatsUpdate
 
   useEffect(() => {
     if (!sessionId) return
@@ -100,6 +103,14 @@ export function useSessionSse(
       es.addEventListener("court-update", (e) => {
         try {
           onCourtUpdateRef.current?.(JSON.parse(e.data) as CourtSlotApi[])
+        } catch {
+          // 파싱 실패 시 무시
+        }
+      })
+
+      es.addEventListener("game-stats-update", (e) => {
+        try {
+          onGameStatsUpdateRef.current?.(JSON.parse(e.data))
         } catch {
           // 파싱 실패 시 무시
         }

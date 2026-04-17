@@ -24,6 +24,11 @@ export default function App() {
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [playStatuses, setPlayStatuses] = useState<PlayStatusMap>({})
   const [latestCourtUpdate, setLatestCourtUpdate] = useState<CourtSlotApi[] | null>(null)
+  const [latestGameStats, setLatestGameStats] = useState<{
+    history: unknown[]
+    pairCount: Record<string, number>
+    playCount: Record<string, number>
+  } | null>(null)
 
   const { page, previousPage, selectedSessionId, setSelectedSessionId, navigate, resetNavigation } = useNavigation()
   const { toast, showToast, hideToast } = useToast()
@@ -87,6 +92,7 @@ export default function App() {
     },
     setPlayStatuses,
     setLatestCourtUpdate,
+    setLatestGameStats,
   )
 
   async function handleLogoutAndReset() {
@@ -151,7 +157,7 @@ export default function App() {
           <MatchingPagePreview />
         )}
         {page === "session-play" && selectedSession && (
-          <SessionPlay session={selectedSession} playStatuses={playStatuses} courtUpdate={latestCourtUpdate} onNavigate={navigate} />
+          <SessionPlay session={selectedSession} playStatuses={playStatuses} courtUpdate={latestCourtUpdate} gameStatsUpdate={latestGameStats} onNavigate={navigate} />
         )}
         {page === "my-reservations" && (
           <MyReservations reservations={reservations} onNavigate={navigate} onCancel={handleCancel} />

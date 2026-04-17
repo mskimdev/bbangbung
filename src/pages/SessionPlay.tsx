@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from "react"
-import { ChevronLeft, Zap, X, History, Plus, UserPlus } from "lucide-react"
+import { ChevronLeft, Zap, X, History, Plus, UserPlus, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { LEVEL_COLORS, formatDate } from "@/lib/badminton"
-import { courtsApi, playStatusApi } from "@/lib/api"
+import { courtsApi, gameStatsApi, playStatusApi } from "@/lib/api"
 import type { BadmintonLevel, BbangSession, CourtSlotApi, Gender, Page, PlayStatus, PlayStatusMap, SessionParticipant } from "@/types"
 
 // ─── 타입 ─────────────────────────────────────────────────────────────────────
@@ -27,6 +27,7 @@ const MODE_SHORT: Record<PlayMode, string> = {
 }
 
 interface GameRecord {
+  gameId?:     string     // UUID, 중복 저장 방지용
   gameNumber:  number
   courtNumber: number
   playerIds:   string[]   // sorted
@@ -97,34 +98,44 @@ function isGuest(player: SessionParticipant) {
   return player.memberId.startsWith("guest-")
 }
 
-// C(n,4) 완전 탐색: pairCount 최소 → playCount 합 최소 → teamDiff 최소
+function comboKey(players: SessionParticipant[]): string {
+  return players.map(p => p.memberId).sort().join("|")
+}
+
+function levelSpread(players: SessionParticipant[]): number {
+  const scores = players.map(p => LEVEL_SCORES[p.level])
+  return Math.max(...scores) - Math.min(...scores)
+}
+
+// 가중치 점수 기반 C(n,4) 완전 탐색
+// score = spread×50 + pairCount×10 + playCount×1 + teamDiff×2 + 성비불균형×30
+// hard cap: spread>2 → 제외 / 이미 뛴 조합 → 제외
+// spread 1단계 차이 ≈ pairCount 5회 차이 (중복이 쌓이면 급수 차이 1단계 감수)
 function findBestFour(
-  pool:         SessionParticipant[],
-  pc:           PairCount,
-  plc:          PlayCount,
-  maxTeamDiff:  number,
-  allowImbalance: boolean,
+  pool:    SessionParticipant[],
+  pc:      PairCount,
+  plc:     PlayCount,
+  played?: Set<string>,
 ): SessionParticipant[] | null {
   if (pool.length < 4) return null
 
   let best: SessionParticipant[] | null = null
-  let bestPC = Infinity, bestPL = Infinity, bestTD = Infinity
+  let bestScore = Infinity
 
   for (let i = 0; i < pool.length - 3; i++) {
     for (let j = i + 1; j < pool.length - 2; j++) {
       for (let k = j + 1; k < pool.length - 1; k++) {
         for (let l = k + 1; l < pool.length; l++) {
           const combo = [pool[i], pool[j], pool[k], pool[l]]
-          if (!allowImbalance && hasGenderImbalance(combo)) continue
+          if (played?.has(comboKey(combo))) continue
+          const ls = levelSpread(combo)
+          if (ls > 2) continue  // hard cap: 3단계 이상 차이 금지
+          if (hasGenderImbalance(combo)) continue  // 3:1 성비 금지 (수동 배정만 허용)
           const td  = bestTeamDiff(combo)
-          if (td > maxTeamDiff) continue
           const pct = getComboTotalPairCount(combo, pc)
           const plt = combo.reduce((s, p) => s + (plc[p.memberId] ?? 0), 0)
-          if (
-            pct < bestPC ||
-            (pct === bestPC && plt < bestPL) ||
-            (pct === bestPC && plt === bestPL && td < bestTD)
-          ) { best = combo; bestPC = pct; bestPL = plt; bestTD = td }
+          const score = ls * 50 + pct * 10 + plt * 5 + td * 2
+          if (score < bestScore) { bestScore = score; best = combo }
         }
       }
     }
@@ -132,25 +143,12 @@ function findBestFour(
   return best
 }
 
-// 점진적 제약 완화: diff≤1 → diff≤2 → gender허용 → 무제한
-function findBestFourWithRelaxation(
-  pool: SessionParticipant[],
-  pc:   PairCount,
-  plc:  PlayCount,
-): SessionParticipant[] | null {
-  return (
-    findBestFour(pool, pc, plc, 1, false) ??
-    findBestFour(pool, pc, plc, 2, false) ??
-    findBestFour(pool, pc, plc, 2, true)  ??
-    findBestFour(pool, pc, plc, Infinity, true)
-  )
-}
-
-// 혼복 전용: 반드시 2M+2F 조합
+// 혼복 전용: 반드시 2M+2F 조합 (동일한 가중치 적용, 성비불균형 패널티 없음)
 function findBestMixed(
-  pool: SessionParticipant[],
-  pc:   PairCount,
-  plc:  PlayCount,
+  pool:    SessionParticipant[],
+  pc:      PairCount,
+  plc:     PlayCount,
+  played?: Set<string>,
 ): SessionParticipant[] | null {
   const males   = pool.filter(p => p.gender === "male")
   const females = pool.filter(p => p.gender === "female")
@@ -164,10 +162,13 @@ function findBestMixed(
       for (let k = 0; k < females.length - 1; k++) {
         for (let l = k + 1; l < females.length; l++) {
           const combo = [males[i], males[j], females[k], females[l]]
+          if (played?.has(comboKey(combo))) continue
+          const ls = levelSpread(combo)
+          if (ls > 2) continue
           const td    = bestTeamDiff(combo)
           const pct   = getComboTotalPairCount(combo, pc)
           const plt   = combo.reduce((s, p) => s + (plc[p.memberId] ?? 0), 0)
-          const score = pct * 1000 + plt * 10 + td
+          const score = ls * 50 + pct * 10 + plt * 5 + td * 2
           if (score < bestScore) { bestScore = score; best = combo }
         }
       }
@@ -177,15 +178,16 @@ function findBestMixed(
 }
 
 function pickGroup(
-  pool: SessionParticipant[],
-  type: MatchType,
-  pc:   PairCount,
-  plc:  PlayCount,
+  pool:    SessionParticipant[],
+  type:    MatchType,
+  pc:      PairCount,
+  plc:     PlayCount,
+  played?: Set<string>,
 ): SessionParticipant[] | null {
-  if (type === "male")   return findBestFourWithRelaxation(pool.filter(p => p.gender === "male"),   pc, plc)
-  if (type === "female") return findBestFourWithRelaxation(pool.filter(p => p.gender === "female"), pc, plc)
-  if (type === "mixed")  return findBestMixed(pool, pc, plc)
-  return findBestFourWithRelaxation(pool, pc, plc)
+  if (type === "male")   return findBestFour(pool.filter(p => p.gender === "male"),   pc, plc, played)
+  if (type === "female") return findBestFour(pool.filter(p => p.gender === "female"), pc, plc, played)
+  if (type === "mixed")  return findBestMixed(pool, pc, plc, played)
+  return findBestFour(pool, pc, plc, played)
 }
 
 function updateCounts(
@@ -233,13 +235,14 @@ function balanceTeams(players: SessionParticipant[]): SessionParticipant[] {
 // ─── 메인 컴포넌트 ────────────────────────────────────────────────────────────
 
 interface SessionPlayProps {
-  session:       BbangSession
-  playStatuses?: PlayStatusMap
-  courtUpdate?:  CourtSlotApi[] | null
-  onNavigate:    (page: Page) => void
+  session:          BbangSession
+  playStatuses?:    PlayStatusMap
+  courtUpdate?:     CourtSlotApi[] | null
+  gameStatsUpdate?: { history: unknown[]; pairCount: Record<string, number>; playCount: Record<string, number> } | null
+  onNavigate:       (page: Page) => void
 }
 
-export function SessionPlay({ session, playStatuses = {}, courtUpdate, onNavigate }: SessionPlayProps) {
+export function SessionPlay({ session, playStatuses = {}, courtUpdate, gameStatsUpdate, onNavigate }: SessionPlayProps) {
   const confirmed = session.participants.filter(p => p.status === "confirmed")
 
   const [courts, setCourts]             = useState<CourtState[]>(() =>
@@ -274,6 +277,9 @@ export function SessionPlay({ session, playStatuses = {}, courtUpdate, onNavigat
   const [showHistory, setShowHistory]       = useState(false)
   const [mode, setMode]                     = useState<PlayMode>("manual")
   const [showGuestModal, setShowGuestModal] = useState(false)
+  const [isAssigning, setIsAssigning]       = useState(false)
+  const [assigningIdx, setAssigningIdx]     = useState<number | null>(null)
+  const prevModeRef = useRef<PlayMode>("manual")
 
   const ownSaveRef = useRef(false)
 
@@ -306,6 +312,21 @@ export function SessionPlay({ session, playStatuses = {}, courtUpdate, onNavigat
       setPendingGames(loadedPending)
       setQueue(allConfirmed.filter(p => !onCourtIds.has(p.memberId)))
     }).catch(() => {})
+  }, [session.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── 마운트 시 게임 통계 로드 (DB 우선, sessionStorage 폴백) ─────────────────
+
+  useEffect(() => {
+    gameStatsApi.get(session.id)
+      .then(res => {
+        const d = res.data
+        if (Array.isArray(d.history)   && d.history.length   > 0) setHistory(d.history as GameRecord[])
+        if (d.pairCount && Object.keys(d.pairCount).length   > 0) setPairCount(d.pairCount)
+        if (d.playCount && Object.keys(d.playCount).length   > 0) setPlayCount(d.playCount)
+      })
+      .catch(() => {
+        // API 실패 시 sessionStorage 폴백 (이미 초기 state에서 로드됨)
+      })
   }, [session.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── 코트 상태 저장 + SSE push ──────────────────────────────────────────────
@@ -361,6 +382,19 @@ export function SessionPlay({ session, playStatuses = {}, courtUpdate, onNavigat
     ])
   }, [courtUpdate]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── 다른 관리자의 게임 통계 SSE 업데이트 반영 ────────────────────────────────
+
+  useEffect(() => {
+    if (!gameStatsUpdate) return
+    const incomingHistory = Array.isArray(gameStatsUpdate.history) ? (gameStatsUpdate.history as GameRecord[]) : []
+    // 로컬보다 많은 게임 기록이 있을 때만 반영 (더 최신 상태)
+    if (incomingHistory.length > history.length) {
+      setHistory(incomingHistory)
+      setPairCount(gameStatsUpdate.pairCount)
+      setPlayCount(gameStatsUpdate.playCount)
+    }
+  }, [gameStatsUpdate]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── 플레이 상태 ─────────────────────────────────────────────────────────────
 
   function isActivePlayer(player: SessionParticipant): boolean {
@@ -377,8 +411,9 @@ export function SessionPlay({ session, playStatuses = {}, courtUpdate, onNavigat
     playStatusApi.set(session.id, player.memberId, next).catch(() => {})
   }
 
-  // ── 통계 ────────────────────────────────────────────────────────────────────
+  // ── 통계 / 이미 뛴 조합 ────────────────────────────────────────────────────
 
+  const playedCombos  = new Set(history.map(g => g.playerIds.join("|")))
   const playingCount  = courts.filter(c => c.status === "playing").reduce((s, c) => s + getCourtPlayers(c).length, 0)
   const totalGameCount = history.length
   const maleCount     = activeQueue.filter(p => p.gender === "male").length
@@ -426,16 +461,15 @@ export function SessionPlay({ session, playStatuses = {}, courtUpdate, onNavigat
 
     const duration = court.startedAt ? Math.floor((Date.now() - court.startedAt) / 1000) : undefined
 
-    const newHistory: GameRecord[] = [
-      ...history,
-      {
-        gameNumber:  totalGameCount + 1,
-        courtNumber: courtIndex + 1,
-        playerIds:   players.map(p => p.memberId).sort(),
-        playerNames: players.map(p => p.memberName),
-        duration,
-      },
-    ]
+    const newRecord: GameRecord = {
+      gameId:      crypto.randomUUID(),
+      gameNumber:  totalGameCount + 1,
+      courtNumber: courtIndex + 1,
+      playerIds:   players.map(p => p.memberId).sort(),
+      playerNames: players.map(p => p.memberName),
+      duration,
+    }
+    const newHistory: GameRecord[] = [...history, newRecord]
 
     // pairCount / playCount 업데이트
     const { pairCount: newPC, playCount: newPLC } = updateCounts(players, pairCount, playCount)
@@ -446,19 +480,42 @@ export function SessionPlay({ session, playStatuses = {}, courtUpdate, onNavigat
         ? { players: [null, null, null, null] as (SessionParticipant | null)[], status: "idle" as const, startedAt: null }
         : c,
     )
-    let newQueue = returnedQueue
+    let newQueue   = returnedQueue
+    let newPending = [...pendingGames]
 
     if (mode === "auto" || mode === "full-auto") {
-      const returnedActive = returnedQueue.filter(isActivePlayer)
-      const four = pickGroup(returnedActive, "free", newPC, newPLC)
-      if (four) {
+      const newPlayedCombos = new Set(newHistory.map(g => g.playerIds.join("|")))
+
+      // 준비된 대기 게임이 있으면 → 먼저 코트로 올리고, 돌아온 4명으로 새 대기 게임 보충
+      const readyPending = newPending.find(g => getPendingPlayers(g).length === 4)
+      if (readyPending) {
         newCourts = newCourts.map((c, i) =>
-          i === courtIndex ? { ...c, players: balanceTeams(four) as (SessionParticipant | null)[] } : c,
+          i === courtIndex
+            ? { ...c, players: balanceTeams(getPendingPlayers(readyPending)) as (SessionParticipant | null)[] }
+            : c,
         )
-        const usedIds = new Set(four.map(p => p.memberId))
-        newQueue = returnedQueue.filter(p => !usedIds.has(p.memberId))
+        newPending = newPending.filter(g => g.id !== readyPending.id)
+
+        // 돌아온 4명 + 잔여 큐로 새 대기 게임 보충 시도
+        const returnedActive = returnedQueue.filter(isActivePlayer)
+        const four = pickGroup(returnedActive, "free", newPC, newPLC, newPlayedCombos)
+        if (four) {
+          newPending = [...newPending, { id: crypto.randomUUID(), players: four as (SessionParticipant | null)[] }]
+          const usedIds = new Set(four.map(p => p.memberId))
+          newQueue = returnedQueue.filter(p => !usedIds.has(p.memberId))
+        }
+      } else {
+        // 대기 게임 없음 → 큐에서 직접 배정
+        const returnedActive = returnedQueue.filter(isActivePlayer)
+        const four = pickGroup(returnedActive, "free", newPC, newPLC, newPlayedCombos)
+        if (four) {
+          newCourts = newCourts.map((c, i) =>
+            i === courtIndex ? { ...c, players: balanceTeams(four) as (SessionParticipant | null)[] } : c,
+          )
+          const usedIds = new Set(four.map(p => p.memberId))
+          newQueue = returnedQueue.filter(p => !usedIds.has(p.memberId))
+        }
       }
-      // four === null → 유효 조합 없음, 대기 (players 큐에 남음)
     }
 
     setHistory(newHistory)
@@ -466,7 +523,43 @@ export function SessionPlay({ session, playStatuses = {}, courtUpdate, onNavigat
     setPlayCount(newPLC)
     setQueue(newQueue)
     setCourts(newCourts)
-    saveCourts(newCourts)
+    setPendingGames(newPending)
+    saveCourts(newCourts, newPending)
+
+    // 게임 통계 DB 저장 — fetch-then-merge로 레이스 컨디션 방지
+    // 1) 최신 DB 상태를 fetch, 2) 이 게임의 델타만 적용, 3) 머지 후 저장
+    const savedGameId = newRecord.gameId!
+    gameStatsApi.get(session.id).then(latest => {
+      const dbHistory = Array.isArray(latest.data.history) ? (latest.data.history as GameRecord[]) : []
+      const dbPC      = latest.data.pairCount ?? {}
+      const dbPLC     = latest.data.playCount ?? {}
+
+      // 이미 동일 gameId로 저장된 경우 중복 저장 방지
+      if (dbHistory.some((g: any) => g.gameId === savedGameId)) return
+
+      // 델타: 이 게임 4명의 페어/플레이 카운트 +1씩 (DB 기준으로 적용)
+      const mergedPC  = { ...dbPC }
+      const mergedPLC = { ...dbPLC }
+      for (let i = 0; i < players.length; i++) {
+        mergedPLC[players[i].memberId] = (dbPLC[players[i].memberId] ?? 0) + 1
+        for (let j = i + 1; j < players.length; j++) {
+          const k = pairKey(players[i].memberId, players[j].memberId)
+          mergedPC[k] = (dbPC[k] ?? 0) + 1
+        }
+      }
+
+      // 히스토리: DB 기준으로 gameNumber 재계산 후 추가
+      const mergedHistory: GameRecord[] = [
+        ...dbHistory,
+        { ...newRecord, gameNumber: dbHistory.length + 1 },
+      ]
+
+      return gameStatsApi.update(session.id, {
+        history:   mergedHistory as unknown[],
+        pairCount: mergedPC,
+        playCount: mergedPLC,
+      })
+    }).catch(() => {})
   }
 
   // ── 대기 게임 ──────────────────────────────────────────────────────────────
@@ -522,7 +615,7 @@ export function SessionPlay({ session, playStatuses = {}, courtUpdate, onNavigat
   function handleAssignPendingManual(gameId: string, type: MatchType) {
     const game = pendingGames.find(g => g.id === gameId)
     if (!game || getPendingPlayers(game).length > 0) return
-    const four = pickGroup(activeQueue, type, pairCount, playCount)
+    const four = pickGroup(activeQueue, type, pairCount, playCount, playedCombos)
     if (!four) return
     const usedIds    = new Set(four.map(p => p.memberId))
     const newPending = pendingGames.map(g =>
@@ -585,49 +678,132 @@ export function SessionPlay({ session, playStatuses = {}, courtUpdate, onNavigat
     setShowGuestModal(false)
   }
 
-  // ── 자동 배정 ──────────────────────────────────────────────────────────────
+  // ── 자동 배정 (애니메이션) ─────────────────────────────────────────────────
 
-  function handleAutoAssign(type: MatchType = "free") {
+  async function handleAutoAssign(type: MatchType = "free") {
+    if (isAssigning) return
+    setIsAssigning(true)
+
     let currentQueue = [...activeQueue]
     const newCourts  = courts.map(c => ({ ...c, players: [...c.players] }))
     const newPending = [...pendingGames]
 
-    // 1. 빈 코트 채우기
+    // 1. 빈 코트 하나씩 애니메이션으로 채우기
     for (let i = 0; i < newCourts.length; i++) {
       const court = newCourts[i]
       if (court.status === "playing" || getCourtPlayers(court).length > 0) continue
-      const four = pickGroup(currentQueue, type, pairCount, playCount)
+      const four = pickGroup(currentQueue, type, pairCount, playCount, playedCombos)
       if (!four) continue
+
+      setAssigningIdx(i)
+      await new Promise(r => setTimeout(r, 400))
+
       court.players = balanceTeams(four) as (SessionParticipant | null)[]
+      setCourts(newCourts.map(c => ({ ...c, players: [...c.players] })))
+
+      const usedIds = new Set(four.map(p => p.memberId))
+      currentQueue  = currentQueue.filter(p => !usedIds.has(p.memberId))
+
+      await new Promise(r => setTimeout(r, 150))
+    }
+
+    setAssigningIdx(null)
+
+    // 2. 대기 게임 생성
+    while (newPending.length < session.courtCount) {
+      const four = pickGroup(currentQueue, type, pairCount, playCount, playedCombos)
+      if (!four) break
+      newPending.push({ id: crypto.randomUUID(), players: four as (SessionParticipant | null)[] })
       const usedIds = new Set(four.map(p => p.memberId))
       currentQueue  = currentQueue.filter(p => !usedIds.has(p.memberId))
     }
 
-    // 2. 대기 게임 생성 (풀오토 모드에서는 생략)
-    if (mode !== "full-auto") {
-      while (newPending.length < session.courtCount) {
-        const four = pickGroup(currentQueue, type, pairCount, playCount)
-        if (!four) break
-        newPending.push({ id: crypto.randomUUID(), players: four as (SessionParticipant | null)[] })
-        const usedIds = new Set(four.map(p => p.memberId))
-        currentQueue  = currentQueue.filter(p => !usedIds.has(p.memberId))
+    const inactiveInQueue = queue.filter(p => !isActivePlayer(p))
+    setCourts(newCourts)
+    setPendingGames(newPending)
+    setQueue([...currentQueue, ...inactiveInQueue])
+    saveCourts(newCourts, newPending)
+    setIsAssigning(false)
+  }
+
+  // ── 풀오토 진입 시 자동 배정 트리거 ──────────────────────────────────────────
+
+  useEffect(() => {
+    if (mode === "full-auto" && prevModeRef.current !== "full-auto") {
+      handleAutoAssign("free")
+    }
+    prevModeRef.current = mode
+  }, [mode]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── 풀오토: 플레이 상태 변경 시 비활성 플레이어 드랍 + 재배정 ────────────────
+
+  useEffect(() => {
+    if (mode !== "full-auto") return
+
+    const dropped: SessionParticipant[] = []
+
+    // 1. idle 코트에서 비활성 플레이어 제거
+    const cleanedCourts = courts.map(court => {
+      if (court.status === "playing") return court
+      const newPlayers = court.players.map(p => {
+        if (!p || isGuest(p)) return p
+        if (!isActivePlayer(p)) { dropped.push(p); return null }
+        return p
+      }) as (SessionParticipant | null)[]
+      return { ...court, players: newPlayers }
+    })
+
+    // 2. 대기 게임에 비활성 플레이어가 있으면 해당 게임 전체 해산
+    const cleanedPending: PendingGame[] = []
+    for (const game of pendingGames) {
+      const hasInactive = game.players.some(p => p && !isGuest(p) && !isActivePlayer(p))
+      if (hasInactive) {
+        game.players.forEach(p => { if (p) dropped.push(p) })
+      } else {
+        cleanedPending.push(game)
       }
     }
 
-    const inactiveInQueue = queue.filter(p => !isActivePlayer(p))
-    const usedPending     = mode === "full-auto" ? pendingGames : newPending
+    if (dropped.length === 0) return
+
+    const newQueue  = [...queue, ...dropped]
+    const newActive = newQueue.filter(isActivePlayer)
+    const currentPlayedCombos = new Set(history.map(g => g.playerIds.join("|")))
+
+    // 3. 빈 idle 코트 자동 채우기
+    let pool = [...newActive]
+    const newCourts = cleanedCourts.map(court => {
+      if (court.status === "playing" || getCourtPlayers(court).length > 0) return court
+      const four = pickGroup(pool, "free", pairCount, playCount, currentPlayedCombos)
+      if (!four) return court
+      const usedIds = new Set(four.map(p => p.memberId))
+      pool = pool.filter(p => !usedIds.has(p.memberId))
+      return { ...court, players: balanceTeams(four) as (SessionParticipant | null)[] }
+    })
+
+    // 4. 부족한 대기 게임 보충
+    let newPending = [...cleanedPending]
+    while (newPending.length < session.courtCount) {
+      const four = pickGroup(pool, "free", pairCount, playCount, currentPlayedCombos)
+      if (!four) break
+      newPending.push({ id: crypto.randomUUID(), players: four as (SessionParticipant | null)[] })
+      const usedIds = new Set(four.map(p => p.memberId))
+      pool = pool.filter(p => !usedIds.has(p.memberId))
+    }
+
+    const inactiveInQueue = newQueue.filter(p => !isActivePlayer(p))
     setCourts(newCourts)
-    setPendingGames(usedPending)
-    setQueue([...currentQueue, ...inactiveInQueue])
-    saveCourts(newCourts, usedPending)
-  }
+    setPendingGames(newPending)
+    setQueue([...pool, ...inactiveInQueue])
+    saveCourts(newCourts, newPending)
+  }, [playStatuses]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── 코트 단건 수동 배정 ────────────────────────────────────────────────────
 
   function handleAssignCourt(courtIndex: number, type: MatchType) {
     const court = courts[courtIndex]
     if (court.status === "playing" || getCourtPlayers(court).length > 0) return
-    const four = pickGroup(activeQueue, type, pairCount, playCount)
+    const four = pickGroup(activeQueue, type, pairCount, playCount, playedCombos)
     if (!four) return
     const newCourts = courts.map((c, i) =>
       i === courtIndex ? { ...c, players: balanceTeams(four) as (SessionParticipant | null)[] } : c,
@@ -684,35 +860,51 @@ export function SessionPlay({ session, playStatuses = {}, courtUpdate, onNavigat
       </div>
 
       {/* 모드 토글 */}
-      <div className="flex items-center justify-between rounded-xl border border-border bg-card px-4 py-3">
-        <div>
-          <p className="text-sm font-semibold">{MODE_LABELS[mode]}</p>
-          <p className="text-xs text-muted-foreground mt-0.5">{MODE_DESCS[mode]}</p>
-        </div>
-        <div className="flex items-center gap-2">
-          {mode !== "manual" && (
-            <Button size="sm" onClick={() => handleAutoAssign("free")} disabled={!canAutoAssign}>
-              <Zap className="size-3.5 mr-1" />
-              {canAutoAssign ? "자동 배정" : "대기자 부족"}
-            </Button>
-          )}
-          <div className="flex overflow-hidden rounded-lg border border-border">
-            {(["manual", "auto", "full-auto"] as PlayMode[]).map(m => (
-              <button
-                key={m}
-                onClick={() => setMode(m)}
-                className={cn(
-                  "px-2.5 py-1.5 text-xs font-medium transition-colors",
-                  mode === m
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                {MODE_SHORT[m]}
-              </button>
-            ))}
+      <div className={cn(
+        "overflow-hidden rounded-xl border bg-card transition-colors duration-300",
+        mode === "full-auto" ? "border-primary/50" : "border-border",
+      )}>
+        <div className="flex items-center justify-between px-4 py-3">
+          <div>
+            <p className="text-sm font-semibold">{MODE_LABELS[mode]}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{MODE_DESCS[mode]}</p>
+          </div>
+          <div className="flex items-center gap-2">
+            {mode === "auto" && (
+              <Button size="sm" onClick={() => handleAutoAssign("free")} disabled={!canAutoAssign || isAssigning}>
+                {isAssigning
+                  ? <Loader2 className="size-3.5 mr-1 animate-spin" />
+                  : <Zap className="size-3.5 mr-1" />}
+                {isAssigning ? "배정 중..." : canAutoAssign ? "자동 배정" : "대기자 부족"}
+              </Button>
+            )}
+            <div className="flex overflow-hidden rounded-lg border border-border">
+              {(["manual", "auto", "full-auto"] as PlayMode[]).map(m => (
+                <button
+                  key={m}
+                  onClick={() => setMode(m)}
+                  className={cn(
+                    "px-2.5 py-1.5 text-xs font-medium transition-colors",
+                    mode === m
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {MODE_SHORT[m]}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
+        {mode === "full-auto" && (
+          <div className="flex items-center gap-2 border-t border-primary/20 bg-primary/5 px-4 py-2.5">
+            <Loader2 className="size-3.5 shrink-0 text-primary animate-spin" />
+            <span className="text-xs font-medium text-primary">자동 진행 중...</span>
+            <span className="ml-auto text-xs text-muted-foreground">
+              {isAssigning ? "배정 중" : canAutoAssign ? "코트 종료 대기" : "대기자 부족"}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* 모바일 통계 */}
@@ -743,6 +935,7 @@ export function SessionPlay({ session, playStatuses = {}, courtUpdate, onNavigat
                 courtNumber={i + 1}
                 court={court}
                 manualMode={mode === "manual"}
+                isAssigning={assigningIdx === i}
                 onSlotClick={pos => handleSlotClick(i, pos)}
                 onGameStart={() => handleGameStart(i)}
                 onGameEnd={() => handleGameEnd(i)}
@@ -774,7 +967,7 @@ export function SessionPlay({ session, playStatuses = {}, courtUpdate, onNavigat
             </div>
             {pendingGames.length === 0 ? (
               <div className="flex items-center justify-center rounded-xl border border-dashed border-border py-6 text-sm text-muted-foreground">
-                {mode === "full-auto" ? "코트 종료 시 자동 배정됩니다" : "자동 배정하거나 직접 추가하세요"}
+                자동 배정하거나 직접 추가하세요
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -900,6 +1093,7 @@ function CourtCard({
   courtNumber,
   court,
   manualMode,
+  isAssigning,
   onSlotClick,
   onGameStart,
   onGameEnd,
@@ -910,6 +1104,7 @@ function CourtCard({
   courtNumber:    number
   court:          CourtState
   manualMode:     boolean
+  isAssigning:    boolean
   onSlotClick:    (position: 0 | 1 | 2 | 3) => void
   onGameStart:    () => void
   onGameEnd:      () => void
@@ -925,16 +1120,23 @@ function CourtCard({
 
   return (
     <div className={cn(
-      "overflow-hidden rounded-xl border bg-card transition-colors",
-      isPlaying ? "border-primary/60" : "border-border",
+      "overflow-hidden rounded-xl border bg-card transition-all duration-300",
+      isAssigning ? "border-primary shadow-lg shadow-primary/20 scale-[1.02]" :
+      isPlaying   ? "border-primary/60" : "border-border",
     )}>
       <div className={cn(
-        "flex items-center justify-between px-4 py-2.5",
-        isPlaying ? "bg-primary/10" : "bg-muted/50",
+        "flex items-center justify-between px-4 py-2.5 transition-colors duration-300",
+        isAssigning ? "bg-primary/20" : isPlaying ? "bg-primary/10" : "bg-muted/50",
       )}>
         <div className="flex items-center gap-2">
           <span className="font-semibold text-sm">{courtNumber}번 코트</span>
-          {isPlaying && (
+          {isAssigning && (
+            <span className="flex items-center gap-1 rounded-full bg-primary px-2 py-0.5 text-xs font-medium text-primary-foreground animate-pulse">
+              <Loader2 className="size-3 animate-spin" />
+              배정 중
+            </span>
+          )}
+          {!isAssigning && isPlaying && (
             <span className="rounded-full bg-primary px-2 py-0.5 text-xs font-medium text-primary-foreground">
               경기 중
             </span>

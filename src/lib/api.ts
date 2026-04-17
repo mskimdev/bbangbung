@@ -21,6 +21,15 @@ export const courtsApi = {
     api.put<import("@/types").CourtSlotApi[]>(`/sessions/${sessionId}/courts`, courts),
 }
 
+export const gameStatsApi = {
+  get: (sessionId: string) =>
+    api.get<{ history: unknown[]; pairCount: Record<string, number>; playCount: Record<string, number> }>(
+      `/sessions/${sessionId}/game-stats`,
+    ),
+  update: (sessionId: string, data: { history: unknown[]; pairCount: Record<string, number>; playCount: Record<string, number> }) =>
+    api.put(`/sessions/${sessionId}/game-stats`, data),
+}
+
 export const playStatusApi = {
   get: (sessionId: string) =>
     api.get<Record<string, string>>(`/sessions/${sessionId}/play-status`),
