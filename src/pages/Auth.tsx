@@ -19,12 +19,37 @@ interface AuthProps {
     phone: string
     password: string
   }) => Promise<unknown>
+  onResetPassword: (data: {
+    name: string
+    phone: string
+    birthdate: string
+    newPassword: string
+  }) => Promise<void>
 }
 
 type Tab = "login" | "signup"
 
-export function Auth({ onLogin, onSignup }: AuthProps) {
+export function Auth({ onLogin, onSignup, onResetPassword }: AuthProps) {
   const [tab, setTab] = useState<Tab>("login")
+  const [showReset, setShowReset] = useState(false)
+
+  if (showReset) {
+    return (
+      <div className="flex min-h-svh flex-col items-center justify-center bg-background px-4">
+        <div className="w-full max-w-sm">
+          <div className="mb-8 text-center">
+            <img src={bbangbungLogo} alt="빵벙" className="mx-auto mb-3 h-16 w-auto" />
+            <h1 className="text-2xl font-bold">비밀번호 찾기</h1>
+            <p className="mt-1 text-sm text-muted-foreground">가입 시 등록한 정보로 본인을 확인해요</p>
+          </div>
+          <ResetPasswordForm
+            onReset={onResetPassword}
+            onBack={() => setShowReset(false)}
+          />
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="flex min-h-svh flex-col items-center justify-center bg-background px-4">
@@ -51,7 +76,7 @@ export function Auth({ onLogin, onSignup }: AuthProps) {
         </div>
 
         {tab === "login" ? (
-          <LoginForm onLogin={onLogin} onSwitchToSignup={() => setTab("signup")} />
+          <LoginForm onLogin={onLogin} onSwitchToSignup={() => setTab("signup")} onForgotPassword={() => setShowReset(true)} />
         ) : (
           <SignupForm onSignup={onSignup} onSwitchToLogin={() => setTab("login")} />
         )}
@@ -64,9 +89,11 @@ export function Auth({ onLogin, onSignup }: AuthProps) {
 function LoginForm({
   onLogin,
   onSwitchToSignup,
+  onForgotPassword,
 }: {
   onLogin: (phone: string, password: string) => Promise<unknown>
   onSwitchToSignup: () => void
+  onForgotPassword: () => void
 }) {
   const [phone, setPhone]       = useState("")
   const [password, setPassword] = useState("")
@@ -109,6 +136,12 @@ function LoginForm({
       <Button type="submit" className="mt-2 w-full" size="lg" disabled={loading}>
         {loading ? "로그인 중..." : "로그인"}
       </Button>
+
+      <p className="text-center text-sm text-muted-foreground">
+        <button type="button" onClick={onForgotPassword} className="text-muted-foreground underline-offset-4 hover:underline">
+          비밀번호를 잊으셨나요?
+        </button>
+      </p>
 
       <p className="text-center text-sm text-muted-foreground">
         아직 회원이 아니신가요?{" "}
@@ -251,6 +284,112 @@ function SignupForm({
         이미 회원이신가요?{" "}
         <button type="button" onClick={onSwitchToLogin} className="text-primary underline-offset-4 hover:underline">
           로그인
+        </button>
+      </p>
+    </form>
+  )
+}
+
+/* ── 비밀번호 찾기 ─────────────────────────────────────── */
+function ResetPasswordForm({
+  onReset,
+  onBack,
+}: {
+  onReset: (data: { name: string; phone: string; birthdate: string; newPassword: string }) => Promise<void>
+  onBack: () => void
+}) {
+  const [name, setName]             = useState("")
+  const [phone, setPhone]           = useState("")
+  const [birthdate, setBirthdate]   = useState("")
+  const [newPassword, setNewPassword] = useState("")
+  const [confirmPw, setConfirmPw]   = useState("")
+  const [showPw, setShowPw]         = useState(false)
+  const [showCPw, setShowCPw]       = useState(false)
+  const [error, setError]           = useState("")
+  const [loading, setLoading]       = useState(false)
+  const [done, setDone]             = useState(false)
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setError("")
+    if (newPassword.length < 6) { setError("비밀번호는 6자 이상이어야 합니다."); return }
+    if (newPassword !== confirmPw) { setError("비밀번호가 일치하지 않습니다."); return }
+    setLoading(true)
+    try {
+      await onReset({
+        name: name.trim(),
+        phone: phone.replace(/-/g, ""),
+        birthdate: birthdateToISO(birthdate),
+        newPassword,
+      })
+      setDone(true)
+    } catch (e) {
+      setError(getErrorMessage(e))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (done) {
+    return (
+      <div className="flex flex-col items-center gap-6 text-center">
+        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/30">
+          <svg className="h-8 w-8 text-green-600 dark:text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+          </svg>
+        </div>
+        <div>
+          <p className="font-semibold">비밀번호가 변경되었습니다</p>
+          <p className="mt-1 text-sm text-muted-foreground">새 비밀번호로 로그인해 주세요.</p>
+        </div>
+        <Button className="w-full" size="lg" onClick={onBack}>로그인으로 돌아가기</Button>
+      </div>
+    )
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+      <Field label="이름">
+        <input type="text" placeholder="홍길동" value={name}
+          onChange={(e) => setName(e.target.value)} className={inputClass} required />
+      </Field>
+
+      <Field label="전화번호">
+        <input type="tel" placeholder="010-0000-0000" value={phone}
+          onChange={(e) => setPhone(formatPhone(e.target.value))} className={inputClass} required />
+      </Field>
+
+      <Field label="생년월일">
+        <input
+          type="text"
+          inputMode="numeric"
+          placeholder="20010112"
+          value={birthdate}
+          onChange={(e) => setBirthdate(formatBirthdate(e.target.value))}
+          className={inputClass}
+          required
+        />
+      </Field>
+
+      <Field label="새 비밀번호">
+        <PasswordInput value={newPassword} onChange={setNewPassword} show={showPw} onToggle={() => setShowPw((v) => !v)} placeholder="6자 이상" />
+      </Field>
+
+      <Field label="새 비밀번호 확인">
+        <PasswordInput value={confirmPw} onChange={setConfirmPw} show={showCPw} onToggle={() => setShowCPw((v) => !v)} placeholder="비밀번호 재입력"
+          isError={confirmPw.length > 0 && confirmPw !== newPassword}
+        />
+      </Field>
+
+      {error && <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>}
+
+      <Button type="submit" className="mt-2 w-full" size="lg" disabled={loading}>
+        {loading ? "확인 중..." : "비밀번호 재설정"}
+      </Button>
+
+      <p className="text-center text-sm text-muted-foreground">
+        <button type="button" onClick={onBack} className="text-muted-foreground underline-offset-4 hover:underline">
+          로그인으로 돌아가기
         </button>
       </p>
     </form>

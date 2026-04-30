@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react"
-import { ChevronLeft, Zap, X, History, Plus, UserPlus, Loader2 } from "lucide-react"
+import { ChevronLeft, Zap, X, History, Plus, UserPlus, Loader2, Users } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { LEVEL_COLORS, formatDate } from "@/lib/badminton"
@@ -848,6 +848,13 @@ export function SessionPlay({ session, playStatuses = {}, courtUpdate, gameStats
               기록 {history.length}
             </button>
           )}
+          <button
+            onClick={() => onNavigate("session-match")}
+            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+          >
+            <Users className="size-3.5" />
+            참가자 뷰
+          </button>
         </div>
       </div>
 

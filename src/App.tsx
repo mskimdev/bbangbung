@@ -48,7 +48,7 @@ export default function App() {
     handleDeleteSession,
   } = useSessions(showToast)
 
-  const { currentUser, authLoading, handleLogin, handleSignup, handleLogout, handleUpdateProfile, handleChangePassword, refreshCurrentUser } =
+  const { currentUser, authLoading, handleLogin, handleSignup, handleLogout, handleUpdateProfile, handleChangePassword, handleResetPassword, refreshCurrentUser } =
     useAuth(showToast)
 
   const { reservations, handleReserve, handleWaitlist, handleCancel } =
@@ -113,6 +113,7 @@ export default function App() {
             await handleSignup(data)
             setShowOnboarding(true)
           }}
+          onResetPassword={handleResetPassword}
         />
         {toast && <Toast message={toast.message} type={toast.type} onClose={hideToast} />}
       </>
@@ -151,7 +152,7 @@ export default function App() {
           />
         )}
         {page === "session-match" && selectedSession && (
-          <MatchingPage session={selectedSession} currentUserId={currentUser.id} onNavigate={navigate} />
+          <MatchingPage session={selectedSession} currentUserId={currentUser.id} previousPage={previousPage} onNavigate={navigate} />
         )}
         {page === "session-match" && !selectedSession && (
           <MatchingPagePreview />

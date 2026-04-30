@@ -82,6 +82,15 @@ export function useAuth(showToast: ShowToast) {
     }
   }
 
+  async function handleResetPassword(data: {
+    name: string
+    phone: string
+    birthdate: string
+    newPassword: string
+  }) {
+    await api.post("/members/reset-password", data)
+  }
+
   async function handleChangePassword(currentPassword: string, newPassword: string) {
     if (!currentUser) return
     try {
@@ -100,5 +109,5 @@ export function useAuth(showToast: ShowToast) {
     } catch {}
   }
 
-  return { currentUser, authLoading, handleLogin, handleSignup, handleLogout, handleUpdateProfile, handleChangePassword, refreshCurrentUser }
+  return { currentUser, authLoading, handleLogin, handleSignup, handleLogout, handleUpdateProfile, handleChangePassword, handleResetPassword, refreshCurrentUser }
 }

@@ -40,15 +40,15 @@ src/
 │   ├── useNavigation.ts             # 페이지 이동, selectedSessionId
 │   ├── useReservations.ts           # 예약, 대기 등록, 취소
 │   ├── useSessions.ts               # 세션 CRUD, 참가자 상태 변경
-│   ├── useSessionSse.ts             # SSE 구독 — SessionDetail 오픈 시 실시간 세션 업데이트
+│   ├── useSessionSse.ts             # SSE 구독 (7 params: onUpdate/onDeleted/onReconnect/onPlayStatus/onCourt/onGameStats)
 │   └── useToast.ts                  # 토스트 메시지 상태
 │
 ├── pages/
 │   ├── Auth.tsx                     # 로그인 / 회원가입 (API 연동)
 │   ├── Onboarding.tsx               # 회원가입 직후 1회 표시되는 앱 안내 (3단계)
 │   ├── Home.tsx                     # 대시보드 (예정 모임, 입금 대기 알림, 정모 진행 중 배너)
-│   ├── MatchingPage.tsx             # 참가자용 실시간 코트 현황 뷰어 (SSE 구독)
-│   ├── SessionPlay.tsx              # 관리자용 정모 진행 화면 (코트 배정 + 대기 게임 + 자동 배정)
+│   ├── MatchingPage.tsx             # 참가자용 실시간 코트 현황 뷰어 (SSE, 타이머, previousPage 뒤로가기)
+│   ├── SessionPlay.tsx              # 관리자용 정모 진행 (코트+대기게임+풀오토+DB통계+다중관리자동기화)
 │   ├── SessionList.tsx              # 세션 목록 + 상태 필터
 │   ├── SessionDetail.tsx            # 세션 상세 + 예약/대기/취소 CTA
 │   ├── MyReservations.tsx           # 내 예약 목록 (예정/지난 탭)
@@ -67,7 +67,7 @@ src/
 │       └── toast.tsx                # 성공/실패 피드백 토스트
 │
 └── lib/
-    ├── api.ts                       # axios 인스턴스 (baseURL, 토큰 자동 첨부)
+    ├── api.ts                       # axios 인스턴스 + courtsApi / gameStatsApi / playStatusApi
     ├── badminton.ts                 # 도메인 상수 및 유틸
     │                                #   LEVEL_COLORS, STATUS_CONFIG
     │                                #   getLevelCounts, formatDate, formatFee
@@ -85,6 +85,7 @@ src/main/java/com/web/bbangbungbe/
 ├── entity/                          # JPA 엔티티 + Enum
 │   ├── Member.java                  # UUID PK, bcrypt 비밀번호
 │   ├── BbangSession.java            # 정모 세션
+│   ├── SessionGameStats.java        # NEW: session_game_stats 테이블 (history/pairCount/playCount LONGTEXT)
 │   ├── SessionParticipant.java      # 복합키 (session_id, member_id)
 │   ├── SessionParticipantId.java    # @Embeddable 복합키
 │   ├── Reservation.java             # 회원 예약 기록
@@ -102,7 +103,9 @@ src/main/java/com/web/bbangbungbe/
 │   │   ├── UpdateProfileRequest.java
 │   │   └── ChangePasswordRequest.java
 │   ├── session/
-│   │   ├── SessionResponse.java     # organizer, participants 포함
+│   │   ├── GameStatsResponse.java       # NEW: record(JsonNode history, pairCount, playCount)
+│   │   ├── GameStatsUpdateRequest.java  # NEW: record(JsonNode history, pairCount, playCount)
+│   │   ├── SessionResponse.java         # organizer, participants 포함
 │   │   ├── SessionParticipantResponse.java
 │   │   ├── SessionCreateRequest.java
 │   │   └── StatusUpdateRequest.java
@@ -112,16 +115,18 @@ src/main/java/com/web/bbangbungbe/
 │
 ├── repository/
 │   ├── MemberRepository.java
-│   ├── BbangSessionRepository.java  # @EntityGraph로 Lazy 로딩 처리
+│   ├── BbangSessionRepository.java       # @EntityGraph로 Lazy 로딩 처리
+│   ├── SessionGameStatsRepository.java   # NEW: JpaRepository<SessionGameStats, String>
 │   ├── SessionParticipantRepository.java
-│   └── ReservationRepository.java   # @EntityGraph로 Lazy 로딩 처리
+│   └── ReservationRepository.java        # @EntityGraph로 Lazy 로딩 처리
 │
 ├── service/
-│   ├── MemberService.java           # 회원가입, 로그인, 프로필/비밀번호 수정
-│   ├── PlayStatusStore.java         # 인메모리 플레이 상태 저장소 (ConcurrentHashMap, 에페머럴)
-│   ├── SessionService.java          # 세션 CRUD, 상태 변경 (변경 시 SSE notify)
-│   ├── ReservationService.java      # 예약/대기/취소, 상태 동기화 (upsert) (변경 시 SSE notify)
-│   └── SessionSseService.java       # SseEmitter 관리, 세션별 구독자에게 push
+│   ├── MemberService.java              # 회원가입, 로그인, 프로필/비밀번호 수정
+│   ├── PlayStatusStore.java            # 인메모리 플레이 상태 저장소 (ConcurrentHashMap, 에페머럴)
+│   ├── SessionGameStatsService.java    # NEW: getStats / updateStats — JSON upsert
+│   ├── SessionService.java             # 세션 CRUD, 상태 변경 (변경 시 SSE notify)
+│   ├── ReservationService.java         # 예약/대기/취소, 상태 동기화 (upsert) (변경 시 SSE notify)
+│   └── SessionSseService.java          # SseEmitter 관리 + notifyGameStats() 추가
 │
 ├── controller/
 │   ├── MemberController.java
@@ -190,6 +195,12 @@ src/main/java/com/web/bbangbungbe/
 |--------|------|------|------|
 | GET | `/` | 불필요 | 현재 코트 배정 현황 조회 (CourtSlotApi[]) |
 | PUT | `/` | ADMIN | 코트 배정 저장 + SSE `court-update` push |
+
+### 게임 통계 (`/api/sessions/{id}/game-stats`)
+| 메서드 | 경로 | 인증 | 설명 |
+|--------|------|------|------|
+| GET | `/` | 불필요 | history / pairCount / playCount JSON 조회 |
+| PUT | `/` | ADMIN | 저장 + SSE `game-stats-update` 브로드캐스트 |
 
 ### 플레이 상태 (`/api/sessions/{id}/play-status`)
 | 메서드 | 경로 | 인증 | 설명 |
@@ -270,11 +281,14 @@ closed         → open (모집 재개)
 - 모든 함수에 try/catch + showToast 에러 처리
 
 ### `useSessionSse`
+총 7개 파라미터 (모두 선택적, sessionId 제외):
 - `sessionId` — null이면 구독 안 함
 - `onUpdate(session)` — `session-update` 이벤트 수신 시 호출
 - `onDeleted()` — `session-deleted` 이벤트 수신 시 호출 (세션 목록으로 이동 + 토스트)
 - `onReconnect()` — SSE 재연결 시 `refreshSession` 호출
 - `onPlayStatusUpdate(statuses)` — `play-status-update` 이벤트 수신 시 호출 (PlayStatusMap)
+- `onCourtUpdate(courts)` — `court-update` 이벤트 수신 시 호출 (CourtSlotApi[])
+- `onGameStatsUpdate(stats)` — `game-stats-update` 이벤트 수신 시 호출 (history/pairCount/playCount)
 - 구독 활성: `session-detail`, `admin`, `session-play`, `home`(오늘 세션 있을 때)
 
 ### `useReservations`
@@ -473,6 +487,19 @@ closed         → open (모집 재개)
 - [x] **confirmed 참가자 강제 취소** (2026-04-16) — Admin 패널에서 confirmed 참가자도 취소 가능
 - [x] **`in_progress` 세션 상태** (2026-04-16) — `SessionStatus` enum에 추가, MySQL VARCHAR(20), STATUS_CONFIG 배지 추가
 - [x] **JPQL 타입 버그 수정** (2026-04-16) — `ReservationRepository` `String → SessionStatus` 파라미터 타입 변경
+- [x] **게임 통계 DB 영속화 + 다중 관리자 동기화** (2026-04-17)
+  - `session_game_stats` 테이블 (MySQL) — sessionId PK, history/pairCount/playCount LONGTEXT
+  - `SessionGameStats.java`, `SessionGameStatsRepository.java`, `SessionGameStatsService.java` 신규 추가
+  - `GET/PUT /api/sessions/{id}/game-stats` 엔드포인트 추가
+  - **Solution 1 (SSE 브로드캐스트)**: 저장 후 `game-stats-update` SSE 이벤트 전파 → 다른 관리자 화면 실시간 동기화
+  - **Solution 2 (fetch-then-merge)**: 저장 직전 DB fetch → 이 게임 델타만 적용 → 동시 저장 시 기록 유실 방지
+  - `GameRecord`에 `gameId: crypto.randomUUID()` 추가 → 중복 저장 스킵
+  - `useSessionSse` 7번째 파라미터 `onGameStatsUpdate` 추가, `game-stats-update` 이벤트 처리
+  - `App.tsx` `latestGameStats` 상태 → `SessionPlay` `gameStatsUpdate` prop 전달
+- [x] **MatchingPage 타이머 + 뒤로가기 개선** (2026-04-17)
+  - 경기 중인 코트에 `00:00` 형식 실시간 `GameTimer` 컴포넌트 표시
+  - `previousPage` prop 추가 → `session-play`에서 진입 시 뒤로가기 "정모 진행"으로 복귀
+- [x] **SessionPlay "참가자 뷰" 버튼** (2026-04-17) — 헤더에 버튼 추가, `session-match` 페이지로 이동
 
 ---
 

@@ -8,12 +8,13 @@ import type { BbangSession, CourtSlotApi, Page, PlayStatus, PlayStatusMap, Sessi
 const BASE_URL = (import.meta.env.VITE_API_URL ?? "http://localhost:8080") + "/api"
 
 interface MatchingPageProps {
-  session: BbangSession
+  session:      BbangSession
   currentUserId: string
-  onNavigate: (page: Page) => void
+  previousPage?: Page
+  onNavigate:   (page: Page) => void
 }
 
-export function MatchingPage({ session, currentUserId, onNavigate }: MatchingPageProps) {
+export function MatchingPage({ session, currentUserId, previousPage, onNavigate }: MatchingPageProps) {
   const confirmed = session.participants.filter((p) => p.status === "confirmed")
   const byId      = Object.fromEntries(confirmed.map((p) => [p.memberId, p]))
 
@@ -91,11 +92,11 @@ export function MatchingPage({ session, currentUserId, onNavigate }: MatchingPag
     <div className="flex flex-col gap-4 pb-28">
       {/* 헤더 */}
       <button
-        onClick={() => onNavigate("session-detail")}
+        onClick={() => onNavigate(previousPage === "session-play" ? "session-play" : "session-detail")}
         className="-mx-1 flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
       >
         <ChevronLeft className="size-4" />
-        정모 상세
+        {previousPage === "session-play" ? "정모 진행" : "정모 상세"}
       </button>
 
       <div>
