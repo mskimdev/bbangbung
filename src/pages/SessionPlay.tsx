@@ -111,11 +111,17 @@ function levelSpread(players: SessionParticipant[]): number {
 // score = spread×50 + pairCount×10 + playCount×1 + teamDiff×2 + 성비불균형×30
 // hard cap: spread>2 → 제외 / 이미 뛴 조합 → 제외
 // spread 1단계 차이 ≈ pairCount 5회 차이 (중복이 쌓이면 급수 차이 1단계 감수)
-function findBestFour(
+function playCountSpread(combo: SessionParticipant[], plc: PlayCount): number {
+  const counts = combo.map(p => plc[p.memberId] ?? 0)
+  return Math.max(...counts) - Math.min(...counts)
+}
+
+function findBestFourWithCap(
   pool:    SessionParticipant[],
   pc:      PairCount,
   plc:     PlayCount,
   played?: Set<string>,
+  playCap?: number,
 ): SessionParticipant[] | null {
   if (pool.length < 4) return null
 
@@ -129,8 +135,9 @@ function findBestFour(
           const combo = [pool[i], pool[j], pool[k], pool[l]]
           if (played?.has(comboKey(combo))) continue
           const ls = levelSpread(combo)
-          if (ls > 2) continue  // hard cap: 3단계 이상 차이 금지
-          if (hasGenderImbalance(combo)) continue  // 3:1 성비 금지 (수동 배정만 허용)
+          if (ls > 2) continue
+          if (hasGenderImbalance(combo)) continue
+          if (playCap !== undefined && playCountSpread(combo, plc) > playCap) continue
           const td  = bestTeamDiff(combo)
           const pct = getComboTotalPairCount(combo, pc)
           const plt = combo.reduce((s, p) => s + (plc[p.memberId] ?? 0), 0)
@@ -143,12 +150,23 @@ function findBestFour(
   return best
 }
 
-// 혼복 전용: 반드시 2M+2F 조합 (동일한 가중치 적용, 성비불균형 패널티 없음)
-function findBestMixed(
+function findBestFour(
   pool:    SessionParticipant[],
   pc:      PairCount,
   plc:     PlayCount,
   played?: Set<string>,
+): SessionParticipant[] | null {
+  return findBestFourWithCap(pool, pc, plc, played, 2)
+    ?? findBestFourWithCap(pool, pc, plc, played)  // 폴백: 하드캡 해제
+}
+
+// 혼복 전용: 반드시 2M+2F 조합 (동일한 가중치 적용, 성비불균형 패널티 없음)
+function findBestMixedWithCap(
+  pool:    SessionParticipant[],
+  pc:      PairCount,
+  plc:     PlayCount,
+  played?: Set<string>,
+  playCap?: number,
 ): SessionParticipant[] | null {
   const males   = pool.filter(p => p.gender === "male")
   const females = pool.filter(p => p.gender === "female")
@@ -165,6 +183,7 @@ function findBestMixed(
           if (played?.has(comboKey(combo))) continue
           const ls = levelSpread(combo)
           if (ls > 2) continue
+          if (playCap !== undefined && playCountSpread(combo, plc) > playCap) continue
           const td    = bestTeamDiff(combo)
           const pct   = getComboTotalPairCount(combo, pc)
           const plt   = combo.reduce((s, p) => s + (plc[p.memberId] ?? 0), 0)
@@ -175,6 +194,16 @@ function findBestMixed(
     }
   }
   return best
+}
+
+function findBestMixed(
+  pool:    SessionParticipant[],
+  pc:      PairCount,
+  plc:     PlayCount,
+  played?: Set<string>,
+): SessionParticipant[] | null {
+  return findBestMixedWithCap(pool, pc, plc, played, 2)
+    ?? findBestMixedWithCap(pool, pc, plc, played)  // 폴백: 하드캡 해제
 }
 
 function pickGroup(
