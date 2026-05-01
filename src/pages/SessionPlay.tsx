@@ -98,6 +98,19 @@ function isGuest(player: SessionParticipant) {
   return player.memberId.startsWith("guest-")
 }
 
+function guestFromSlot(guest: import("@/types").CourtSlotGuest | null | undefined): SessionParticipant | null {
+  if (!guest) return null
+  return {
+    memberId:       `guest-${guest.name}-${guest.gender}-${guest.level}`,
+    memberName:     guest.name,
+    gender:         guest.gender,
+    level:          guest.level,
+    reservedAt:     "",
+    status:         "confirmed",
+    usedFreeTicket: false,
+  }
+}
+
 function comboKey(players: SessionParticipant[]): string {
   return players.map(p => p.memberId).sort().join("|")
 }
@@ -326,7 +339,7 @@ export function SessionPlay({ session, playStatuses = {}, courtUpdate, gameStats
         if (!c) return { status: "idle" as const, players: [null, null, null, null] as (SessionParticipant | null)[], startedAt: null }
         return {
           status:    c.status as "idle" | "playing",
-          players:   c.slots.map(id => id ? (byId[id] ?? null) : null) as (SessionParticipant | null)[],
+          players:   c.slots.map((id, pi) => id ? (byId[id] ?? null) : guestFromSlot(c.guests?.[pi])) as (SessionParticipant | null)[],
           startedAt: c.startedAt ?? null,
         }
       })
@@ -334,7 +347,7 @@ export function SessionPlay({ session, playStatuses = {}, courtUpdate, gameStats
         .filter(c => c.courtNumber > session.courtCount)
         .map(c => ({
           id:      crypto.randomUUID(),
-          players: c.slots.map(id => id ? (byId[id] ?? null) : null) as (SessionParticipant | null)[],
+          players: c.slots.map((id, pi) => id ? (byId[id] ?? null) : guestFromSlot(c.guests?.[pi])) as (SessionParticipant | null)[],
         }))
       const onCourtIds = new Set(res.data.flatMap(c => c.slots.filter(Boolean) as string[]))
       setCourts(loadedCourts)
@@ -360,22 +373,29 @@ export function SessionPlay({ session, playStatuses = {}, courtUpdate, gameStats
 
   // ── 코트 상태 저장 + SSE push ──────────────────────────────────────────────
 
+  function toGuestInfo(p: SessionParticipant | null) {
+    if (!p || !isGuest(p)) return null
+    return { name: p.memberName, gender: p.gender, level: p.level }
+  }
+
   function saveCourts(updatedCourts: CourtState[], updatedPending?: PendingGame[]) {
     const pending        = updatedPending ?? pendingGames
     const courtPayload   = updatedCourts.map((c, i) => ({
       courtNumber: i + 1,
       status:      c.status,
       slots:       c.players.map(p => (p && !isGuest(p)) ? p.memberId : null),
+      guests:      c.players.map(toGuestInfo),
       startedAt:   c.startedAt ?? null,
     }))
     const pendingPayload = pending.map((g, i) => ({
       courtNumber: session.courtCount + i + 1,
       status:      "pending" as const,
       slots:       g.players.map(p => (p && !isGuest(p)) ? p.memberId : null),
+      guests:      g.players.map(toGuestInfo),
       startedAt:   null,
     }))
     ownSaveRef.current = true
-    setTimeout(() => { ownSaveRef.current = false }, 2000)
+    setTimeout(() => { ownSaveRef.current = false }, 5000)
     courtsApi.update(session.id, [...courtPayload, ...pendingPayload]).catch(() => {})
   }
 
@@ -391,7 +411,7 @@ export function SessionPlay({ session, playStatuses = {}, courtUpdate, gameStats
       if (!c) return { status: "idle" as const, players: [null, null, null, null] as (SessionParticipant | null)[], startedAt: null }
       return {
         status:    c.status as "idle" | "playing",
-        players:   c.slots.map(id => id ? (byId[id] ?? null) : null) as (SessionParticipant | null)[],
+        players:   c.slots.map((id, pi) => id ? (byId[id] ?? null) : guestFromSlot(c.guests?.[pi])) as (SessionParticipant | null)[],
         startedAt: c.startedAt ?? null,
       }
     })
@@ -399,15 +419,18 @@ export function SessionPlay({ session, playStatuses = {}, courtUpdate, gameStats
       .filter(c => c.courtNumber > session.courtCount)
       .map(c => ({
         id:      crypto.randomUUID(),
-        players: c.slots.map(id => id ? (byId[id] ?? null) : null) as (SessionParticipant | null)[],
+        players: c.slots.map((id, pi) => id ? (byId[id] ?? null) : guestFromSlot(c.guests?.[pi])) as (SessionParticipant | null)[],
       }))
-    const assignedIds = new Set(courtUpdate.flatMap(c => c.slots.filter(Boolean) as string[]))
+    const assignedIds    = new Set(courtUpdate.flatMap(c => c.slots.filter(Boolean) as string[]))
+    const assignedGuests = new Set<string>()
+    newCourts.forEach(c => c.players.forEach(p => { if (p && isGuest(p)) assignedGuests.add(p.memberId) }))
+    newPending.forEach(g => g.players.forEach(p => { if (p && isGuest(p)) assignedGuests.add(p.memberId) }))
 
     setCourts(newCourts)
     setPendingGames(newPending)
     setQueue(prev => [
       ...allConfirmed.filter(p => !assignedIds.has(p.memberId)),
-      ...prev.filter(p => isGuest(p)),
+      ...prev.filter(p => isGuest(p) && !assignedGuests.has(p.memberId)),
     ])
   }, [courtUpdate]) // eslint-disable-line react-hooks/exhaustive-deps
 

@@ -49,10 +49,17 @@ export interface BbangSession {
   participants: SessionParticipant[]
 }
 
+export interface CourtSlotGuest {
+  name: string
+  gender: Gender
+  level: BadmintonLevel
+}
+
 export interface CourtSlotApi {
   courtNumber: number
   status: "idle" | "playing" | "pending"
   slots: (string | null)[]  // 4 elements — member IDs, null for empty
+  guests?: (CourtSlotGuest | null)[]  // 4 elements — guest info for null slots
   startedAt?: number | null  // Unix ms timestamp, null if not started
 }
 

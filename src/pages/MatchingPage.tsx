@@ -181,11 +181,12 @@ export function MatchingPage({ session, currentUserId, previousPage, onNavigate 
               <div key={game.courtNumber} className="overflow-hidden rounded-xl border border-border bg-card">
                 <div className="flex items-center justify-between bg-muted/50 px-4 py-2.5">
                   <span className="text-sm font-semibold text-muted-foreground">{i + 1}번째 대기</span>
-                  <span className="text-xs text-muted-foreground">{game.slots.filter(Boolean).length}명</span>
+                  <span className="text-xs text-muted-foreground">{game.slots.filter((id, pi) => id || game.guests?.[pi]).length}명</span>
                 </div>
                 <div className="grid grid-cols-2 gap-2 p-3">
                   {game.slots.map((id, pos) => {
-                    const player = id ? (byId[id] ?? null) : null
+                    const g = !id ? game.guests?.[pos] : null
+                    const player = id ? (byId[id] ?? null) : g ? { memberId: `guest-${g.name}-${g.gender}-${g.level}`, memberName: g.name, gender: g.gender, level: g.level, reservedAt: "", status: "confirmed", usedFreeTicket: false } as import("@/types").SessionParticipant : null
                     if (!player) return <div key={pos} className="h-9 rounded-lg border-2 border-dashed border-border/40" />
                     const isMe   = player.memberId === currentUserId
                     const isMale = player.gender === "male"
@@ -263,7 +264,12 @@ function CourtView({
   currentUserId: string
 }) {
   const isPlaying  = court.status === "playing"
-  const players    = court.slots.map((id) => (id ? (byId[id] ?? null) : null))
+  const players    = court.slots.map((id, pi) => {
+    if (id) return byId[id] ?? null
+    const g = court.guests?.[pi]
+    if (!g) return null
+    return { memberId: `guest-${g.name}-${g.gender}-${g.level}`, memberName: g.name, gender: g.gender, level: g.level, reservedAt: "", status: "confirmed", usedFreeTicket: false } as import("@/types").SessionParticipant
+  })
   const filled     = players.filter(Boolean).length
   const isMyCourt  = players.some((p) => p?.memberId === currentUserId)
 
