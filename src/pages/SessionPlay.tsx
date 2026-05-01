@@ -993,6 +993,7 @@ export function SessionPlay({ session, playStatuses = {}, courtUpdate, gameStats
                 key={i}
                 courtNumber={i + 1}
                 court={court}
+                playCount={playCount}
                 manualMode={mode === "manual"}
                 isAssigning={assigningIdx === i}
                 onSlotClick={pos => handleSlotClick(i, pos)}
@@ -1035,6 +1036,7 @@ export function SessionPlay({ session, playStatuses = {}, courtUpdate, gameStats
                     key={game.id}
                     game={game}
                     index={i}
+                    playCount={playCount}
                     canAssign={hasIdleCourt && getPendingPlayers(game).length === 4}
                     manualMode={mode === "manual"}
                     onSlotClick={pos => handlePendingSlotClick(game.id, pos)}
@@ -1079,6 +1081,7 @@ export function SessionPlay({ session, playStatuses = {}, courtUpdate, gameStats
                     key={p.memberId}
                     player={p}
                     position={i + 1}
+                    gameCount={playCount[p.memberId] ?? 0}
                     playStatus={isGuest(p) ? "active" : (playStatuses[p.memberId] ?? "active")}
                     onStatusChange={isGuest(p) ? undefined : () => handleAdminStatusCycle(p)}
                   />
@@ -1151,6 +1154,7 @@ function GameTimer({ startedAt }: { startedAt: number }) {
 function CourtCard({
   courtNumber,
   court,
+  playCount,
   manualMode,
   isAssigning,
   onSlotClick,
@@ -1162,6 +1166,7 @@ function CourtCard({
 }: {
   courtNumber:    number
   court:          CourtState
+  playCount:      PlayCount
   manualMode:     boolean
   isAssigning:    boolean
   onSlotClick:    (position: 0 | 1 | 2 | 3) => void
@@ -1242,6 +1247,7 @@ function CourtCard({
           <PlayerSlot
             key={pos}
             player={court.players[pos]}
+            gameCount={court.players[pos] ? (playCount[court.players[pos]!.memberId] ?? 0) : 0}
             onClick={() => onSlotClick(pos)}
             locked={isPlaying}
           />
@@ -1277,6 +1283,7 @@ function CourtCard({
 function PendingGameCard({
   game,
   index,
+  playCount,
   canAssign,
   manualMode,
   onSlotClick,
@@ -1287,6 +1294,7 @@ function PendingGameCard({
 }: {
   game:          PendingGame
   index:         number
+  playCount:     PlayCount
   canAssign:     boolean
   manualMode:    boolean
   onSlotClick:   (position: 0 | 1 | 2 | 3) => void
@@ -1325,6 +1333,7 @@ function PendingGameCard({
           <PlayerSlot
             key={pos}
             player={game.players[pos]}
+            gameCount={game.players[pos] ? (playCount[game.players[pos]!.memberId] ?? 0) : 0}
             onClick={() => onSlotClick(pos)}
             locked={false}
           />
@@ -1356,10 +1365,11 @@ function PendingGameCard({
   )
 }
 
-function PlayerSlot({ player, onClick, locked }: {
-  player:  SessionParticipant | null
-  onClick: () => void
-  locked:  boolean
+function PlayerSlot({ player, gameCount = 0, onClick, locked }: {
+  player:     SessionParticipant | null
+  gameCount?: number
+  onClick:    () => void
+  locked:     boolean
 }) {
   if (!player) {
     return (
@@ -1396,7 +1406,8 @@ function PlayerSlot({ player, onClick, locked }: {
         {player.level}
       </span>
       <span className="truncate text-sm">{player.memberName}</span>
-      {!locked && <X className="ml-auto size-3 shrink-0 text-muted-foreground" />}
+      <span className="ml-auto shrink-0 text-xs text-muted-foreground">{gameCount}</span>
+      {!locked && <X className="size-3 shrink-0 text-muted-foreground" />}
     </button>
   )
 }
@@ -1404,11 +1415,13 @@ function PlayerSlot({ player, onClick, locked }: {
 function QueueChip({
   player,
   position,
+  gameCount = 0,
   playStatus = "active",
   onStatusChange,
 }: {
   player:         SessionParticipant
   position:       number
+  gameCount?:     number
   playStatus?:    "active" | "resting" | "done"
   onStatusChange?: () => void
 }) {
@@ -1434,6 +1447,7 @@ function QueueChip({
         {player.level}
       </span>
       <span className="text-sm">{player.memberName}</span>
+      <span className="text-xs text-muted-foreground">{gameCount}게임</span>
       {isResting && <span className="text-xs font-medium text-amber-600 dark:text-amber-400">휴식</span>}
       {isDone    && <span className="text-xs text-muted-foreground">종료</span>}
     </div>
